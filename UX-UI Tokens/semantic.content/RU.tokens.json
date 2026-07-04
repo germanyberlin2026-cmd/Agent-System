@@ -1,0 +1,55 @@
+{
+  "badge": {
+    "status": {
+      "text": {
+        "ready": {
+          "$type": "string",
+          "$value": "Готово",
+          "$extensions": {
+            "com.figma.variableId": "VariableID:196:9778",
+            "com.figma.scopes": [
+              "ALL_SCOPES"
+            ],
+            "com.figma.type": "string"
+          }
+        },
+        "partly-ready": {
+          "$type": "string",
+          "$value": "Частично готово",
+          "$extensions": {
+            "com.figma.variableId": "VariableID:196:9782",
+            "com.figma.scopes": [
+              "ALL_SCOPES"
+            ],
+            "com.figma.type": "string"
+          }
+        },
+        "at-risk": {
+          "$type": "string",
+          "$value": "Под риском",
+          "$extensions": {
+            "com.figma.variableId": "VariableID:196:9786",
+            "com.figma.scopes": [
+              "ALL_SCOPES"
+            ],
+            "com.figma.type": "string"
+          }
+        },
+        "needs-attention": {
+          "$type": "string",
+          "$value": "Требует внимания",
+          "$extensions": {
+            "com.figma.variableId": "VariableID:196:9790",
+            "com.figma.scopes": [
+              "ALL_SCOPES"
+            ],
+            "com.figma.type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$extensions": {
+    "com.figma.modeName": "RU"
+  }
+}
