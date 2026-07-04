@@ -1,0 +1,226 @@
+/* ══════════════════════════════════════════
+   SEMANTIC TOKENS
+   Source of truth: Figma "semantic" collection (Light/Dark modes).
+   Gives primitives meaning (background/surface/text/border/action/status).
+   Light values are the default; dark overrides apply under
+   prefers-color-scheme so the whole app is theme-ready without any
+   markup changes.
+
+   Additions beyond the Figma export (flagged there as missing, or needed
+   to cover this app's agent/strategy identity colors) are marked "gap-fill".
+══════════════════════════════════════════ */
+
+@theme {
+  /* color.background */
+  --color-background-default: var(--p-color-neutral-50);
+  --color-background-subtle: var(--p-color-neutral-100);
+  --color-background-muted: var(--p-color-neutral-200);
+  --color-background-inverse: var(--p-color-neutral-950);
+
+  /* color.surface */
+  --color-surface-default: var(--p-color-neutral-25);
+  --color-surface-subtle: var(--p-color-neutral-100);
+  --color-surface-elevated: var(--p-color-neutral-0);
+  --color-surface-sunken: var(--p-color-neutral-100);
+  --color-surface-overlay: var(--p-color-neutral-0);
+
+  /* color.text */
+  --color-text-primary: var(--p-color-neutral-950);
+  --color-text-secondary: var(--p-color-neutral-700);
+  --color-text-muted: var(--p-color-neutral-500);
+  --color-text-disabled: var(--p-color-neutral-400);
+  --color-text-inverse: var(--p-color-neutral-50);
+  --color-text-brand: var(--p-color-blue-700);
+
+  /* color.border */
+  --color-border-default: var(--p-color-neutral-300);
+  --color-border-subtle: var(--p-color-neutral-200);
+  --color-border-strong: var(--p-color-neutral-500);
+  --color-border-disabled: var(--p-color-neutral-400);
+  --color-border-inverse: var(--p-color-neutral-800);
+  --color-border-fokus: var(--p-color-blue-500);
+
+  /* color.action */
+  --color-action-primary: var(--p-color-blue-600);
+  --color-action-primary-hover: var(--p-color-blue-700);
+  --color-action-primary-active: var(--p-color-blue-800);
+  --color-action-primary-text: var(--p-color-neutral-50);
+  --color-action-primary-icon: var(--p-color-neutral-50);
+  --color-action-secondary: var(--p-color-neutral-100);
+  --color-action-secondary-hover: var(--p-color-neutral-200);
+  --color-action-secondary-active: var(--p-color-neutral-300);
+  --color-action-secondary-text: var(--p-color-neutral-850);
+  --color-action-secondary-icon: var(--p-color-neutral-850);
+  --color-action-secondary-border: var(--p-color-neutral-300);
+  --color-action-secondary-border-hover: var(--p-color-neutral-400);
+  --color-action-secondary-border-active: var(--p-color-neutral-500);
+  --color-action-secondary-fokus: var(--p-color-blue-500);
+  --color-action-disabled-bg: var(--p-color-neutral-200);
+  --color-action-disabled-text: var(--p-color-neutral-400);
+
+  /* color.action — gap-fill: tertiary (outline/text button variant).
+     Figma component export flagged these as missing ("Bitte
+     semantic/action/tertiary ergaenzen"); values formalize the
+     approximations it fell back to. */
+  --color-action-tertiary: transparent;
+  --color-action-tertiary-hover: var(--color-surface-subtle);
+  --color-action-tertiary-active: var(--color-background-muted);
+  --color-action-tertiary-text: var(--color-action-primary);
+  --color-action-tertiary-icon: var(--color-action-primary);
+
+  /* color.action — gap-fill: ghost (no border, minimal) */
+  --color-action-ghost: transparent;
+  --color-action-ghost-hover: var(--color-surface-subtle);
+  --color-action-ghost-active: var(--color-background-muted);
+
+  /* color.action — gap-fill: dedicated hover/active/text/icon/fokus for the
+     solid status-colored button variants (previously approximated with
+     unrelated status/border or status/text shades). */
+  --color-action-danger-hover: var(--p-color-danger-600);
+  --color-action-danger-active: var(--p-color-danger-700);
+  --color-action-danger-text: var(--color-action-primary-text);
+  --color-action-danger-icon: var(--color-action-primary-icon);
+  --color-action-danger-fokus: var(--color-status-danger-default);
+
+  --color-action-warning-hover: var(--p-color-warning-600);
+  --color-action-warning-active: var(--p-color-warning-700);
+  --color-action-warning-text: var(--color-action-primary-text);
+  --color-action-warning-icon: var(--color-action-primary-icon);
+  --color-action-warning-fokus: var(--color-status-warning-default);
+
+  --color-action-success-hover: var(--p-color-success-700);
+  --color-action-success-active: var(--p-color-success-800);
+  --color-action-success-text: var(--color-action-primary-text);
+  --color-action-success-icon: var(--color-action-primary-icon);
+  --color-action-success-fokus: var(--color-status-success-default);
+
+  /* color.status */
+  --color-status-success-default: var(--p-color-success-600);
+  --color-status-success-background: var(--p-color-success-50);
+  --color-status-success-subtle: var(--p-color-success-100);
+  --color-status-success-border: var(--p-color-success-300);
+  --color-status-success-text: var(--p-color-success-800);
+
+  --color-status-warning-default: var(--p-color-warning-500);
+  --color-status-warning-background: var(--p-color-warning-50);
+  --color-status-warning-subtle: var(--p-color-warning-100);
+  --color-status-warning-border: var(--p-color-warning-300);
+  --color-status-warning-text: var(--p-color-warning-800);
+
+  --color-status-danger-default: var(--p-color-danger-500);
+  --color-status-danger-background: var(--p-color-danger-50);
+  --color-status-danger-subtle: var(--p-color-danger-100);
+  --color-status-danger-border: var(--p-color-danger-300);
+  --color-status-danger-text: var(--p-color-danger-800);
+
+  /* color.role — gap-fill: not part of the Figma export at all. This app
+     identifies agent roles, nav sections and orchestrator strategies by a
+     consistent accent hue; previously each component hardcoded its own
+     (slightly different) hex per role. One canonical set, sourced from the
+     primitive palette, replaces all of them. Kept identical across light/dark
+     since these are identity accents, not text/surface contrast pairs. */
+  --color-role-scanner: var(--p-color-teal-400);
+  --color-role-orchestrator: var(--p-color-purple-400);
+  --color-role-architect: var(--p-color-blue-400);
+  --color-role-coder: var(--p-color-success-400);
+  --color-role-tester: var(--p-color-warning-400);
+  --color-role-reviewer: var(--p-color-danger-400);
+  --color-role-documenter: var(--p-color-neutral-400);
+  --color-role-debugger: var(--p-color-pink-400);
+}
+
+/* Dark overrides: plain custom-property assignments, not another @theme
+   block. @theme only needs to register each name once (above) so Tailwind
+   can generate utilities from it; every utility and var() reference then
+   follows the normal CSS cascade and picks up whichever value wins here. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background-default: var(--p-color-neutral-950);
+    --color-background-subtle: var(--p-color-neutral-900);
+    --color-background-muted: var(--p-color-neutral-800);
+    --color-background-inverse: var(--p-color-neutral-50);
+
+    --color-surface-default: var(--p-color-neutral-900);
+    --color-surface-subtle: var(--p-color-neutral-800);
+    --color-surface-elevated: var(--p-color-neutral-850);
+    --color-surface-sunken: var(--p-color-neutral-950);
+    --color-surface-overlay: var(--p-color-neutral-900);
+
+    --color-text-primary: var(--p-color-neutral-50);
+    --color-text-secondary: var(--p-color-neutral-200);
+    --color-text-muted: var(--p-color-neutral-400);
+    --color-text-disabled: var(--p-color-neutral-600);
+    --color-text-inverse: var(--p-color-neutral-950);
+    --color-text-brand: var(--p-color-blue-300);
+
+    --color-border-default: var(--p-color-neutral-700);
+    --color-border-subtle: var(--p-color-neutral-800);
+    --color-border-strong: var(--p-color-neutral-500);
+    --color-border-disabled: var(--p-color-neutral-600);
+    --color-border-inverse: var(--p-color-neutral-200);
+    --color-border-fokus: var(--p-color-blue-400);
+
+    --color-action-primary: var(--p-color-blue-400);
+    --color-action-primary-hover: var(--p-color-blue-300);
+    --color-action-primary-active: var(--p-color-blue-200);
+    --color-action-primary-text: var(--p-color-neutral-950);
+    --color-action-primary-icon: var(--p-color-neutral-950);
+    --color-action-secondary: var(--p-color-neutral-800);
+    --color-action-secondary-hover: var(--p-color-neutral-700);
+    --color-action-secondary-active: var(--p-color-neutral-600);
+    --color-action-secondary-text: var(--p-color-neutral-200);
+    --color-action-secondary-icon: var(--p-color-neutral-200);
+    --color-action-secondary-border: var(--p-color-neutral-600);
+    --color-action-secondary-border-hover: var(--p-color-neutral-500);
+    --color-action-secondary-border-active: var(--p-color-neutral-400);
+    --color-action-secondary-fokus: var(--p-color-blue-400);
+    --color-action-disabled-bg: var(--p-color-neutral-800);
+    --color-action-disabled-text: var(--p-color-neutral-600);
+
+    --color-action-tertiary: transparent;
+    --color-action-tertiary-hover: var(--color-surface-subtle);
+    --color-action-tertiary-active: var(--color-background-muted);
+    --color-action-tertiary-text: var(--color-action-primary);
+    --color-action-tertiary-icon: var(--color-action-primary);
+
+    --color-action-ghost: transparent;
+    --color-action-ghost-hover: var(--color-surface-subtle);
+    --color-action-ghost-active: var(--color-background-muted);
+
+    --color-action-danger-hover: var(--p-color-danger-300);
+    --color-action-danger-active: var(--p-color-danger-200);
+    --color-action-danger-text: var(--color-action-primary-text);
+    --color-action-danger-icon: var(--color-action-primary-icon);
+    --color-action-danger-fokus: var(--color-status-danger-default);
+
+    --color-action-warning-hover: var(--p-color-warning-300);
+    --color-action-warning-active: var(--p-color-warning-200);
+    --color-action-warning-text: var(--color-action-primary-text);
+    --color-action-warning-icon: var(--color-action-primary-icon);
+    --color-action-warning-fokus: var(--color-status-warning-default);
+
+    --color-action-success-hover: var(--p-color-success-300);
+    --color-action-success-active: var(--p-color-success-200);
+    --color-action-success-text: var(--color-action-primary-text);
+    --color-action-success-icon: var(--color-action-primary-icon);
+    --color-action-success-fokus: var(--color-status-success-default);
+
+    --color-status-success-default: var(--p-color-success-400);
+    --color-status-success-background: var(--p-color-success-950);
+    --color-status-success-subtle: var(--p-color-success-900);
+    --color-status-success-border: var(--p-color-success-700);
+    --color-status-success-text: var(--p-color-success-200);
+
+    --color-status-warning-default: var(--p-color-warning-400);
+    --color-status-warning-background: var(--p-color-warning-950);
+    --color-status-warning-subtle: var(--p-color-warning-900);
+    --color-status-warning-border: var(--p-color-warning-700);
+    --color-status-warning-text: var(--p-color-warning-200);
+
+    --color-status-danger-default: var(--p-color-danger-400);
+    --color-status-danger-background: var(--p-color-danger-950);
+    --color-status-danger-subtle: var(--p-color-danger-900);
+    --color-status-danger-border: var(--p-color-danger-700);
+    --color-status-danger-text: var(--p-color-danger-200);
+  }
+}

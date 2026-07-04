@@ -37,8 +37,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Build the system prompt for task decomposition
-    const systemPrompt = `You are the Orchestrator agent in the Kceva system. Your job is to decompose the user's command into atomic tasks and route each task to the most suitable worker agent.
+    const promptTemplate = await loadSystemPrompt("orchestrator");
+    const systemPrompt = `${promptTemplate}
 
 Available agents:
 ${JSON.stringify(available_agents, null, 2)}
@@ -47,6 +47,14 @@ Project knowledge:
 ${JSON.stringify(knowledge, null, 2)}
 
 Routing strategy: ${routing_strategy}
+
+Ground rules:
+- Use only facts present in Project knowledge and Available agents. Never invent files, frameworks, changes, tests, or capabilities.
+- A request to inspect or update agent prompts concerns the agent_configuration records supplied in Project knowledge, not a fictional agents/ directory.
+- Create only tasks necessary for the command. Do not automatically add coding, testing, review, and documentation tasks.
+- Read-only questions should produce an analysis task, not implementation tasks.
+- A task may claim a change was completed only when its output includes the exact target record/file and concrete proposed mutation.
+- If the available context cannot perform a requested mutation, clearly return a proposed change and mark it as not applied.
 
 Return a JSON object with a "tasks" array. Each task must have:
 - "title": short task title
@@ -78,6 +86,18 @@ Return ONLY valid JSON, no markdown.`;
     );
   }
 });
+
+async function loadSystemPrompt(promptKey: string): Promise<string> {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) throw new Error("Supabase prompt configuration is unavailable");
+  const response = await fetch(`${url}/rest/v1/system_prompts?prompt_key=eq.${promptKey}&is_active=eq.true&select=content`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` }
+  });
+  const rows = await response.json();
+  if (!response.ok || !rows?.[0]?.content) throw new Error(`Database system prompt not found: ${promptKey}`);
+  return rows[0].content;
+}
 
 async function callLLM(provider: string, apiKey: string, model: string, systemPrompt: string, userMessage: string): Promise<string> {
   if (provider === "openai" || provider === "mistral") {

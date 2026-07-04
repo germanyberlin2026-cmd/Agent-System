@@ -4,6 +4,10 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	// Workflows can edit this application itself. HMR would reload the browser and
+	// kill the in-flight client coordinator halfway through its dependency graph.
+	// Keep the dev server stable; refresh manually after a completed run.
+	server: { hmr: false },
 	plugins: [
 		tailwindcss(),
 		sveltekit({
@@ -17,5 +21,11 @@ export default defineConfig({
 			// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 			adapter: adapter()
 		})
-	]
+	],
+	ssr: {
+		noExternal: ['@lucide/svelte']
+	},
+	optimizeDeps: {
+		include: ['@lucide/svelte']
+	}
 });

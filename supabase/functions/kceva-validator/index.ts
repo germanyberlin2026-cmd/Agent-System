@@ -29,7 +29,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const systemPrompt = `You are the Validation agent in the Kceva system. Your job is to validate the outputs of worker agents.
+    const promptTemplate = await loadSystemPrompt("validator");
+    const systemPrompt = `${promptTemplate}
 
 Validation strategy: ${validation_strategy}
 
@@ -92,6 +93,18 @@ Return a JSON object with:
     );
   }
 });
+
+async function loadSystemPrompt(promptKey: string): Promise<string> {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) throw new Error("Supabase prompt configuration is unavailable");
+  const response = await fetch(`${url}/rest/v1/system_prompts?prompt_key=eq.${promptKey}&is_active=eq.true&select=content`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` }
+  });
+  const rows = await response.json();
+  if (!response.ok || !rows?.[0]?.content) throw new Error(`Database system prompt not found: ${promptKey}`);
+  return rows[0].content;
+}
 
 async function callLLM(provider: string, apiKey: string, model: string, systemPrompt: string, userMessage: string): Promise<string> {
   if (provider === "openai" || provider === "mistral") {

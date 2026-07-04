@@ -11,12 +11,15 @@ import {
 	addTaskLog,
 	addRunLog,
 	fetchAgents,
+	updateAgent,
 	fetchAssignments,
-	fetchApiKeys
+	fetchApiKeys,
+	fetchSkills,
+	fetchAgentSkills
 } from './api.js';
 import { ROUTING_STRATEGIES, VALIDATION_STRATEGIES } from './constants.js';
 
-const EDGE_FUNCTION_BASE = `${SUPABASE_URL}/functions/v1`;
+const LOCAL_EXECUTION_BASE = '/api/execution';
 
 function getAuthHeaders() {
 	return {
@@ -27,18 +30,26 @@ function getAuthHeaders() {
 }
 
 async function callEdgeFunction(name, body) {
-	const response = await fetch(`${EDGE_FUNCTION_BASE}/${name}`, {
-		method: 'POST',
-		headers: getAuthHeaders(),
-		body: JSON.stringify(body)
-	});
-	if (!response.ok) {
-		const errorText = await response.text();
-		throw new Error(`Edge function ${name} failed (${response.status}): ${errorText}`);
+	const targets = [`${SUPABASE_URL}/functions/v1/${name}`, `${LOCAL_EXECUTION_BASE}/${name}`];
+	let lastError;
+	for (const target of targets) {
+		try {
+			const response = await fetch(target, {
+			method: 'POST',
+			headers: target.startsWith('http') ? getAuthHeaders() : { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body)
+			});
+			if (response.ok) {
+				const data = await response.json();
+				if (data.error) throw new Error(data.error);
+				return data;
+			}
+			lastError = new Error(`Execution backend ${name} failed (${response.status}): ${await response.text()}`);
+		} catch (error) {
+			lastError = error;
+		}
 	}
-	const data = await response.json();
-	if (data.error) throw new Error(data.error);
-	return data;
+	throw lastError || new Error(`Execution backend ${name} is unavailable`);
 }
 
 // ============================================================
@@ -47,14 +58,21 @@ async function callEdgeFunction(name, body) {
 
 export async function runScanner(project) {
 	await updateProject(project.id, { scan_status: 'scanning' });
-	await addRunLog(project.id, 'info', `Scanner started for project: ${project.name}`);
 
 	try {
-		const result = await callEdgeFunction('kceva-scanner', {
-			project_path: project.source_path,
-			source_type: project.source_type,
-			project_id: project.id
-		});
+		let result;
+		if (project.source_type === 'local') {
+			const response = await fetch('/api/scan-local', {
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ project_path: project.source_path })
+			});
+			result = await response.json();
+			if (!response.ok) throw new Error(result.error || 'Local scan failed');
+		} else {
+			result = await callEdgeFunction('kceva-scanner', {
+				project_path: project.source_path, source_type: project.source_type, project_id: project.id
+			});
+		}
 
 		const knowledge = {
 			tech_stack: result.tech_stack || [],
@@ -74,7 +92,6 @@ export async function runScanner(project) {
 		return knowledge;
 	} catch (err) {
 		await updateProject(project.id, { scan_status: 'failed' });
-		await addRunLog(project.id, 'error', `Scanner failed: ${err.message}`);
 		throw err;
 	}
 }
@@ -90,6 +107,8 @@ export async function decomposeTasks(run, knowledge, routingStrategy) {
 	const agents = await fetchAgents();
 	const assignments = await fetchAssignments();
 	const apiKeys = await fetchApiKeys();
+	const skills = await fetchSkills();
+	const agentSkillLinks = await fetchAgentSkills();
 
 	const orchestratorAgent = agents.find((a) => a.role === 'orchestrator');
 	const orchestratorAssignment = assignments.find((a) => a.agent_id === orchestratorAgent?.id);
@@ -99,16 +118,39 @@ export async function decomposeTasks(run, knowledge, routingStrategy) {
 		throw new Error('Orchestrator agent has no API key assigned. Please assign a model in the Agents panel.');
 	}
 
+	const runtimeKnowledge = {
+		...knowledge,
+		orchestration_rules: [
+			'Use only supplied project knowledge and agent_configuration.',
+			'Never invent files, frameworks, tests, or applied changes.',
+			'Create only tasks necessary for the user command.',
+			'Agent prompt requests target database agent_configuration records.'
+		],
+		agent_configuration: agents.map((agent) => ({
+			id: agent.id, name: agent.name, role: agent.role, description: agent.description,
+			scope: agent.scope, system_prompt: agent.system_prompt,
+			input_schema: agent.input_schema, output_schema: agent.output_schema
+		})),
+		skill_registry: skills.filter((skill) => skill.is_active).map((skill) => ({
+			name: skill.name, description: skill.description, input_schema: skill.input_schema,
+			output_schema: skill.output_schema, allowed_tools: skill.allowed_tools, success_criteria: skill.success_criteria
+		}))
+	};
+
 	const result = await callEdgeFunction('kceva-orchestrator', {
 		command: run.command,
-		knowledge,
+		knowledge: runtimeKnowledge,
 		routing_strategy: routingStrategy,
 		available_agents: agents.map((a) => ({
 			id: a.id,
 			name: a.name,
 			role: a.role,
 			scope: a.scope,
-			description: a.description
+			description: a.description,
+			system_prompt: a.system_prompt,
+			input_schema: a.input_schema,
+			output_schema: a.output_schema,
+			skills: agentSkillLinks.filter((link) => link.agent_id === a.id).map((link) => skills.find((skill) => skill.id === link.skill_id)?.name).filter(Boolean)
 		})),
 		api_key: orchestratorApiKey.api_key_encrypted,
 		api_key_id: orchestratorApiKey.id,
@@ -116,20 +158,53 @@ export async function decomposeTasks(run, knowledge, routingStrategy) {
 		provider: orchestratorApiKey.provider
 	});
 
-	const tasks = result.tasks || [];
+	let tasks = result.tasks || [];
+	const mutationRequested = /change|update|fix|implement|create|remove|redesign|შეცვალ|გაასწორ|შექმენ|წაშალ|დიზაინ/i.test(run.command);
+	if (!/documentation|document|docs|readme|დოკუმენტ/i.test(run.command)) {
+		tasks = tasks.filter((task) => task.agent_role !== 'documenter');
+	}
+	if (!/debug|diagnos|error|exception|bug|fix issue|შეცდომ|დაბაგ/i.test(run.command)) {
+		tasks = tasks.filter((task) => task.agent_role !== 'debugger');
+	}
+	const designRequested = /design|style|ui|ux|layout|apple|დიზაინ|სტილ|ინტერფეის/i.test(run.command);
+	if (mutationRequested && designRequested && !tasks.some((task) => task.agent_role === 'architect')) {
+		tasks.unshift({
+			title: 'Design implementation plan',
+			description: `Inspect the real project context and define a concrete, minimal implementation plan for: ${run.command}`,
+			agent_role: 'architect', input_payload: { command: run.command }, max_retries: 1,
+			success_criteria: ['Names real project files', 'Defines implementable design decisions and constraints']
+		});
+	}
+	if (!mutationRequested) {
+		const analysisTask = tasks.find((task) => ['architect', 'reviewer', 'debugger'].includes(task.agent_role)) || tasks[0];
+		tasks = analysisTask ? [analysisTask] : [];
+	}
 	const createdTasks = [];
+	const roleTasks = new Map();
 
 	for (const task of tasks) {
 		const agent = agents.find((a) => a.id === task.agent_id || a.role === task.agent_role);
+		const dependencyRoles = task.depends_on_roles || ({
+			coder: ['architect'], tester: ['coder'], reviewer: ['coder', 'tester'], documenter: ['reviewer']
+		}[agent?.role] || []);
+		const dependencyIds = dependencyRoles.map((role) => roleTasks.get(role)?.id).filter(Boolean);
+		const assignedSkillIds = agentSkillLinks.filter((link) => link.agent_id === agent?.id).map((link) => link.skill_id);
+		const selectedSkills = skills.filter((skill) => skill.is_active && assignedSkillIds.includes(skill.id) && (!task.skills?.length || task.skills.includes(skill.name)));
 		const created = await createTask({
 			run_id: run.id,
 			agent_id: agent?.id || null,
 			title: task.title,
 			description: task.description || '',
-			input_payload: task.input_payload || {},
+			input_payload: {
+				...(task.input_payload || {}),
+				depends_on: dependencyIds,
+				success_criteria: task.success_criteria || ['Output matches the requested task and contains no invented claims'],
+				skills: selectedSkills.map((skill) => skill.name)
+			},
 			max_retries: task.max_retries || 3
 		});
 		createdTasks.push(created);
+		if (agent?.role) roleTasks.set(agent.role, created);
 		await addTaskLog(created.id, 'info', `Task created: ${task.title}`);
 		await addRunLog(run.id, 'info', `Task routed: "${task.title}" → ${agent?.name || 'unassigned'}`);
 	}
@@ -155,6 +230,8 @@ export async function executeTask(task, run, knowledge) {
 	const assignments = await fetchAssignments();
 	const assignment = assignments.find((a) => a.agent_id === agent.id);
 	const apiKeys = await fetchApiKeys();
+	const allSkills = await fetchSkills();
+	const selectedSkills = allSkills.filter((skill) => skill.is_active && (task.input_payload?.skills || []).includes(skill.name));
 	const apiKey = apiKeys.find((k) => k.id === assignment?.api_key_id);
 
 	if (!apiKey) {
@@ -166,8 +243,43 @@ export async function executeTask(task, run, knowledge) {
 	await updateTask(task.id, { status: 'running', started_at: new Date().toISOString() });
 	await addTaskLog(task.id, 'info', `Agent "${agent.name}" starting execution`);
 
+	if (agent.role === 'tester' && knowledge?.file_tree?.root) {
+		const response = await fetch('/api/tool-execute', {
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'verify', project_root: knowledge.file_tree.root }),
+			signal: AbortSignal.timeout(100000)
+		});
+		const verification = await response.json();
+		await updateTask(task.id, {
+			status: verification.success ? 'done' : 'failed', output_payload: verification,
+			error_message: verification.success ? null : verification.output || verification.error,
+			completed_at: new Date().toISOString()
+		});
+		await addTaskLog(task.id, verification.success ? 'info' : 'error', verification.success ? 'Deterministic verification passed' : 'Deterministic verification failed', verification);
+		if (!verification.success) throw new Error('Deterministic verification failed');
+		return { output: verification, tokens_used: 0, cost: 0 };
+	}
+
 	let attempt = 0;
 	const maxRetries = task.max_retries || 3;
+	let repairContext = null;
+	let verifiedFiles = [];
+	if (['coder', 'reviewer'].includes(agent.role) && knowledge?.file_tree?.root) {
+		const evidenceText = JSON.stringify(task.input_payload?.upstream_results || []);
+		const candidatePaths = [...new Set(evidenceText.match(/(?:src|supabase|static)\/[A-Za-z0-9_./+\[\]-]+\.(?:svelte|css|js|ts|json|md|sql)/g) || [])].slice(0, 12);
+		if (candidatePaths.length) {
+			const inspectionResponse = await fetch('/api/tool-execute', {
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ action: 'read_files', project_root: knowledge.file_tree.root, paths: candidatePaths }),
+				signal: AbortSignal.timeout(15000)
+			});
+			const inspection = await inspectionResponse.json();
+			if (inspectionResponse.ok && inspection.success) {
+				verifiedFiles = inspection.files;
+				await addTaskLog(task.id, 'info', `Preflight inspected ${verifiedFiles.filter((file) => file.exists).length}/${candidatePaths.length} referenced file(s)`, { files: verifiedFiles.map(({ path, exists }) => ({ path, exists })) });
+			}
+		}
+	}
 
 	while (attempt <= maxRetries) {
 		try {
@@ -182,14 +294,79 @@ export async function executeTask(task, run, knowledge) {
 				task: {
 					title: task.title,
 					description: task.description,
-					input_payload: task.input_payload
+					input_payload: { ...task.input_payload, repair_context: repairContext }
 				},
-				knowledge,
+				knowledge: {
+					...knowledge,
+					verified_files: verifiedFiles,
+					selected_skills: selectedSkills.map((skill) => ({
+						name: skill.name, instructions: skill.instructions, allowed_tools: skill.allowed_tools,
+						input_schema: skill.input_schema, output_schema: skill.output_schema, success_criteria: skill.success_criteria
+					})),
+					execution_rules: [
+						'Use only supplied project knowledge.',
+						'Never invent files, tests, database writes, or completed actions.',
+						'If a mutation cannot actually be applied, return applied=false.',
+						'Repair attempts must inspect structured tool feedback and must not repeat a failed exact search.'
+					]
+				},
 				api_key: apiKey.api_key_encrypted,
 				api_key_id: apiKey.id,
 				model: assignment.model_id,
 				provider: apiKey.provider
 			});
+
+			// Older worker deployments returned LLM failures as HTTP 200 fallback payloads.
+			// Never mark those responses as successful tasks.
+			if (result?.output?.error || result?.output?.fallback) {
+				throw new Error(result.output.error || 'Worker returned a fallback response');
+			}
+
+			if (agent.role === 'coder' && Array.isArray(result?.output?.files) && knowledge?.file_tree?.root) {
+				const files = result.output.files.map((file) => ({
+					path: file?.path || file?.file || file?.filename,
+					content: file?.content ?? file?.code ?? file?.source,
+					search: file?.search,
+					replace: file?.replace
+				}));
+				const response = await fetch('/api/tool-execute', {
+					method: 'POST', headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'apply_files', project_root: knowledge.file_tree.root, files })
+				});
+				const execution = await response.json();
+				if (!response.ok || !execution.success) {
+					repairContext = {
+						attempt: attempt + 1,
+						failed_output: result.output,
+						tool_feedback: execution
+					};
+					throw new Error(`${execution.error || 'File application failed'}${execution.code ? ` [${execution.code}]` : ''}`);
+				}
+				result.output.execution = execution;
+				result.output.applied = true;
+				const changedPaths = execution.evidence.map((item) => item.path);
+				const postResponse = await fetch('/api/tool-execute', {
+					method: 'POST', headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'read_files', project_root: knowledge.file_tree.root, paths: changedPaths }),
+					signal: AbortSignal.timeout(15000)
+				});
+				const postInspection = await postResponse.json();
+				if (postResponse.ok && postInspection.success) result.output.execution.verified_after = postInspection.files;
+				await addTaskLog(task.id, 'info', `Applied ${execution.evidence.length} file change(s)`, execution);
+			}
+			if (agent.role === 'coder' && Array.isArray(result?.output?.agent_updates)) {
+				const allAgents = await fetchAgents();
+				const evidence = [];
+				for (const change of result.output.agent_updates) {
+					const target = allAgents.find((item) => item.id === change.agent_id || item.role === change.role);
+					if (!target || !change.system_prompt) continue;
+					await updateAgent(target.id, { system_prompt: change.system_prompt });
+					evidence.push({ agent_id: target.id, role: target.role, updated: true });
+				}
+				result.output.execution = { success: true, action: 'update_agents', evidence };
+				result.output.applied = evidence.length > 0;
+				await addTaskLog(task.id, 'info', `Updated ${evidence.length} agent prompt(s)`, result.output.execution);
+			}
 
 			await updateTask(task.id, {
 				status: 'done',
@@ -203,6 +380,19 @@ export async function executeTask(task, run, knowledge) {
 			return result;
 		} catch (err) {
 			attempt++;
+			const quotaExhausted = /RESOURCE_EXHAUSTED|quota exceeded/i.test(err.message);
+			const nonRetriable = /Each file change needs|Path escapes project|Protected path|Unsupported tool action/i.test(err.message);
+			const zeroQuota = /limit:\s*0/i.test(err.message);
+			const retryMatch = err.message.match(/retry(?:Delay| in)?["':\s]+(\d+(?:\.\d+)?)s/i);
+			if (quotaExhausted && !zeroQuota && retryMatch && attempt <= maxRetries) {
+				const waitMs = Math.min(Math.ceil(Number(retryMatch[1]) * 1000) + 500, 60000);
+				await updateTask(task.id, { status: 'retrying', retry_count: attempt });
+				await addTaskLog(task.id, 'warn', `Rate limited; queued for retry in ${Math.ceil(waitMs / 1000)}s`);
+				await new Promise((resolve) => setTimeout(resolve, waitMs));
+				continue;
+			}
+			if (zeroQuota) attempt = maxRetries + 1;
+			if (nonRetriable) attempt = maxRetries + 1;
 			if (attempt > maxRetries) {
 				await updateTask(task.id, {
 					status: 'failed',
@@ -221,32 +411,38 @@ export async function executeTask(task, run, knowledge) {
 }
 
 export async function executeAllTasks(tasks, run, knowledge, concurrency = 3) {
-	await addRunLog(run.id, 'info', `Executing ${tasks.length} tasks (concurrency: ${concurrency})`);
+	concurrency = Math.min(concurrency, 2);
+	await addRunLog(run.id, 'info', `Executing dependency graph (${tasks.length} tasks, max concurrency: ${concurrency})`);
 
-	const queue = [...tasks];
-	const running = [];
+	const pending = new Map(tasks.map((task) => [task.id, task]));
+	const outcomes = new Map();
 	const results = [];
 
-	while (queue.length > 0 || running.length > 0) {
-		while (running.length < concurrency && queue.length > 0) {
-			const task = queue.shift();
-			const promise = executeTask(task, run, knowledge)
-				.then((result) => {
-					results.push({ task, result, success: true });
-					return result;
-				})
-				.catch((err) => {
-					results.push({ task, error: err, success: false });
-					return null;
-				})
-				.finally(() => {
-					const idx = running.indexOf(promise);
-					if (idx >= 0) running.splice(idx, 1);
-				});
-			running.push(promise);
+	while (pending.size) {
+		const ready = [];
+		for (const task of pending.values()) {
+			const deps = task.input_payload?.depends_on || [];
+			if (deps.some((id) => outcomes.get(id) === false)) {
+				await updateTask(task.id, { status: 'failed', error_message: 'Blocked by failed dependency', completed_at: new Date().toISOString() });
+				outcomes.set(task.id, false); pending.delete(task.id); continue;
+			}
+			if (deps.every((id) => outcomes.get(id) === true)) ready.push(task);
 		}
-		if (running.length > 0) {
-			await Promise.race(running);
+		if (pending.size === 0) break;
+		if (!ready.length) throw new Error('Workflow dependency cycle or missing dependency');
+		for (let index = 0; index < ready.length; index += concurrency) {
+			const batch = ready.slice(index, index + concurrency);
+			await Promise.all(batch.map(async (task) => {
+				pending.delete(task.id);
+				const deps = task.input_payload?.depends_on || [];
+				task.input_payload.upstream_results = results.filter((item) => deps.includes(item.task.id)).map((item) => item.result?.output);
+				try {
+					const result = await executeTask(task, run, knowledge);
+					results.push({ task, result, success: true }); outcomes.set(task.id, true);
+				} catch (error) {
+					results.push({ task, error, success: false }); outcomes.set(task.id, false);
+				}
+			}));
 		}
 	}
 
@@ -260,6 +456,41 @@ export async function executeAllTasks(tasks, run, knowledge, concurrency = 3) {
 export async function validateRun(run, tasks, knowledge, validationStrategy) {
 	await updateRun(run.id, { status: 'validating' });
 	await addRunLog(run.id, 'info', `Validation gate: ${validationStrategy}`);
+	const failedTasks = tasks.filter((task) => task.status === 'failed');
+	if (failedTasks.length > 0) {
+		const result = {
+			passed: false,
+			summary: `${failedTasks.length} task(s) failed or were blocked before validation`,
+			details: failedTasks.map((task) => ({ title: task.title, valid: false, error: task.error_message })),
+			deterministic: true
+		};
+		await addRunLog(run.id, 'error', `Validation failed: ${result.summary}`);
+		return result;
+	}
+
+	const testerTask = tasks.find((task) => /test|verify/i.test(task.title));
+	const reviewerTask = tasks.find((task) => /review/i.test(task.title));
+	const testerFailed = testerTask?.output_payload?.success === false;
+	const reviewerApproved = reviewerTask?.output_payload?.approved === true || reviewerTask?.output_payload?.review?.approved === true;
+	const reviewerRejected = reviewerTask?.output_payload?.approved === false || reviewerTask?.output_payload?.review?.status === 'defective';
+	if (testerFailed || reviewerRejected) {
+		const result = {
+			passed: false,
+			summary: testerFailed ? 'Deterministic test execution failed' : 'Adversarial review rejected the implementation',
+			details: [], deterministic: true
+		};
+		await addRunLog(run.id, 'error', `Validation failed: ${result.summary}`);
+		return result;
+	}
+	if ((!testerTask || testerTask.status === 'done') && reviewerApproved) {
+		const result = {
+			passed: true,
+			summary: 'All required tasks completed; deterministic verification passed and reviewer approved the implementation',
+			details: [], deterministic: true
+		};
+		await addRunLog(run.id, 'info', `Validation passed: ${result.summary}`);
+		return result;
+	}
 
 	const agents = await fetchAgents();
 	const testerAgent = agents.find((a) => a.role === 'tester' || a.role === 'reviewer');
@@ -325,17 +556,18 @@ export async function aggregateAndDeliver(run, tasks, validationResult) {
 
 	const totalTokens = tasks.reduce((sum, t) => sum + (t.tokens_used || 0), 0);
 	const totalCost = tasks.reduce((sum, t) => sum + (parseFloat(t.cost) || 0), 0);
+	const runSucceeded = validationResult.passed && failedTasks.length === 0;
 
 	await updateRun(run.id, {
-		status: validationResult.passed ? 'completed' : 'failed',
+		status: runSucceeded ? 'completed' : 'failed',
 		final_output: finalOutput,
 		total_tokens: totalTokens,
 		total_cost: totalCost,
 		completed_at: new Date().toISOString()
 	});
 
-	await addRunLog(run.id, 'info',
-		`Run completed: ${completedTasks.length}/${tasks.length} tasks done, ${totalTokens} tokens, $${totalCost.toFixed(4)}`);
+	await addRunLog(run.id, runSucceeded ? 'info' : 'error',
+		`Run ${runSucceeded ? 'completed' : 'failed'}: ${completedTasks.length}/${tasks.length} tasks done, ${failedTasks.length} failed, ${totalTokens} tokens, $${totalCost.toFixed(4)}`);
 
 	return finalOutput;
 }

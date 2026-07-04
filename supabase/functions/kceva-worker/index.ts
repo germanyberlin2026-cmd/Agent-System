@@ -29,15 +29,15 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const systemPrompt = agent.system_prompt ||
-      `You are the ${agent.name} agent. Your scope: ${agent.scope || 'general'}. ` +
-      `Your role: ${agent.role}. Complete the task according to your specialization. ` +
-      `Return a JSON object matching your output schema: ${JSON.stringify(agent.output_schema || {})}`;
+    if (!agent.system_prompt) throw new Error(`Agent ${agent.name} has no database system prompt`);
+    const systemPrompt = agent.system_prompt;
 
     const userMessage = `Task: ${task.title}\nDescription: ${task.description}\n` +
       `Input: ${JSON.stringify(task.input_payload || {})}\n` +
       `Project knowledge: ${JSON.stringify(knowledge || {})}\n\n` +
-      `Return ONLY valid JSON matching your output schema. No markdown.`;
+      `Return ONLY valid JSON matching your output schema. No markdown.\n` +
+      `Use only the supplied project knowledge. Never invent files, frameworks, test runs, database changes, or completed actions. ` +
+      `If you cannot actually apply a change, label it as proposed and include applied: false.`;
 
     let output: any = null;
     let tokensUsed = 0;
@@ -62,15 +62,8 @@ Deno.serve(async (req: Request) => {
       // Rough cost estimation based on model
       cost = estimateCost(model, tokensUsed);
     } catch (llmError) {
-      // If LLM call fails, return a structured error output
-      output = {
-        error: llmError.message,
-        agent: agent.name,
-        task: task.title,
-        fallback: true,
-      };
-      tokensUsed = 0;
-      cost = 0;
+      // LLM failures must propagate as failures; returning HTTP 200 marks tasks as done.
+      throw llmError;
     }
 
     return new Response(JSON.stringify({

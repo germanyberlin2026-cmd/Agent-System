@@ -1,5 +1,4 @@
 import { supabase } from './supabase.js';
-import { DEFAULT_AGENTS } from './constants.js';
 
 // ============================================================
 // AGENTS
@@ -34,14 +33,41 @@ export async function createAgent(agent) {
 }
 
 export async function updateAgent(id, updates) {
+	if (updates.system_prompt !== undefined) {
+		const { data: current } = await supabase.from('agents').select('system_prompt').eq('id', id).maybeSingle();
+		const { data: versions, error: versionReadError } = await supabase
+			.from('prompt_versions').select('version').eq('agent_id', id).order('version', { ascending: false }).limit(1);
+		if (!versionReadError) {
+			const nextVersion = (versions?.[0]?.version || 0) + 1;
+			await supabase.from('prompt_versions').update({ is_active: false }).eq('agent_id', id);
+			await supabase.from('prompt_versions').insert({
+				agent_id: id, version: nextVersion, system_prompt: updates.system_prompt,
+				change_reason: updates.change_reason || (current?.system_prompt ? 'Agent prompt updated' : 'Initial prompt'), is_active: true
+			});
+		}
+	}
+	const cleanUpdates = { ...updates };
+	delete cleanUpdates.change_reason;
 	const { data, error } = await supabase
 		.from('agents')
-		.update({ ...updates, updated_at: new Date().toISOString() })
+		.update({ ...cleanUpdates, updated_at: new Date().toISOString() })
 		.eq('id', id)
 		.select()
 		.single();
 	if (error) throw error;
 	return data;
+}
+
+export async function fetchPromptVersions(agentId) {
+	const { data, error } = await supabase.from('prompt_versions').select('*').eq('agent_id', agentId).order('version', { ascending: false });
+	if (error) return [];
+	return data || [];
+}
+
+export async function rollbackPromptVersion(agentId, version) {
+	const { data: target, error } = await supabase.from('prompt_versions').select('*').eq('agent_id', agentId).eq('version', version).single();
+	if (error) throw error;
+	return updateAgent(agentId, { system_prompt: target.system_prompt, change_reason: `Rollback to v${version}` });
 }
 
 export async function deleteAgent(id) {
@@ -51,12 +77,8 @@ export async function deleteAgent(id) {
 
 export async function seedDefaultAgents() {
 	const existing = await fetchAgents();
-	if (existing.length > 0) return existing;
-
-	for (const agent of DEFAULT_AGENTS) {
-		await createAgent(agent);
-	}
-	return fetchAgents();
+	if (existing.length === 0) throw new Error('Default agents are missing. Apply the database seed migration.');
+	return existing;
 }
 
 // ============================================================
@@ -69,7 +91,10 @@ export async function fetchApiKeys() {
 		.select('*')
 		.order('created_at', { ascending: true });
 	if (error) throw error;
-	return data;
+	return (data || []).map((key) => ({
+		...key,
+		provider: String(key.provider || '').toLowerCase()
+	}));
 }
 
 export async function createApiKey({ provider, label, api_key, available_models }) {
@@ -77,7 +102,7 @@ export async function createApiKey({ provider, label, api_key, available_models 
 	const { data, error } = await supabase
 		.from('api_keys')
 		.insert({
-			provider,
+			provider: provider.toLowerCase(),
 			label,
 			api_key_encrypted: api_key,
 			api_key_hint: hint,
@@ -87,6 +112,58 @@ export async function createApiKey({ provider, label, api_key, available_models 
 		.single();
 	if (error) throw error;
 	return data;
+}
+
+export async function discoverGoogleModels(apiKey) {
+	const response = await fetch(
+		`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=1000`
+	);
+	const payload = await response.json();
+	if (!response.ok) throw new Error(payload?.error?.message || 'Google model discovery failed');
+	return (payload.models || [])
+		.filter((model) => model.supportedGenerationMethods?.includes('generateContent'))
+		.map((model) => ({
+			model_id: (model.baseModelId || model.name || '').replace(/^models\//, ''),
+			display_name: model.displayName || model.baseModelId || model.name,
+			description: model.description || '',
+			category: 'Text-out models',
+			input_token_limit: model.inputTokenLimit ?? null,
+			output_token_limit: model.outputTokenLimit ?? null,
+			capabilities: model.supportedGenerationMethods || []
+		}))
+		.filter((model) => model.model_id);
+}
+
+export async function updateApiKeyModels(id, models) {
+	const { data, error } = await supabase
+		.from('api_keys')
+		.update({ available_models: models, updated_at: new Date().toISOString() })
+		.eq('id', id)
+		.select()
+		.single();
+	if (error) throw error;
+	return data;
+}
+
+export async function refreshGoogleModelsIfStale(keys, maxAgeMs = 24 * 60 * 60 * 1000) {
+	let changed = false;
+	for (const key of keys.filter((item) => item.provider === 'google')) {
+		const updatedAt = new Date(key.updated_at || 0).getTime();
+		const isStale = !key.available_models?.length || Date.now() - updatedAt >= maxAgeMs;
+		if (!isStale) continue;
+		const models = await discoverGoogleModels(key.api_key_encrypted);
+		await updateApiKeyModels(key.id, models);
+		changed = true;
+	}
+	return changed ? fetchApiKeys() : keys;
+}
+
+export async function normalizeApiKeyProvider(id, provider) {
+	const { error } = await supabase
+		.from('api_keys')
+		.update({ provider: provider.toLowerCase() })
+		.eq('id', id);
+	if (error) throw error;
 }
 
 export async function deleteApiKey(id) {
@@ -137,6 +214,54 @@ export async function removeAssignment(agentId) {
 		.delete()
 		.eq('agent_id', agentId);
 	if (error) throw error;
+}
+
+// ============================================================
+// SKILL REGISTRY
+// ============================================================
+
+export async function fetchSkills() {
+	const { data, error } = await supabase.from('skills').select('*').order('name');
+	if (error) throw new Error(`Skill registry could not be loaded: ${error.message}`);
+	return data || [];
+}
+
+export async function fetchAgentSkills() {
+	const { data, error } = await supabase.from('agent_skills').select('*').order('priority');
+	if (error) throw new Error(`Agent skill assignments could not be loaded: ${error.message}`);
+	return data || [];
+}
+
+export async function createSkill(skill) {
+	const payload = {
+		name: skill.name,
+		description: skill.description || '',
+		instructions: skill.instructions,
+		allowed_tools: skill.allowed_tools || [],
+		success_criteria: skill.success_criteria || [],
+		input_schema: skill.input_schema || {},
+		output_schema: skill.output_schema || {},
+		is_active: true
+	};
+	const { data, error } = await supabase.from('skills').insert(payload).select().single();
+	if (error) throw error;
+	return data;
+}
+
+export async function updateSkill(id, updates) {
+	const { data, error } = await supabase.from('skills').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+	if (error) throw error;
+	return data;
+}
+
+export async function setAgentSkill(agentId, skillId, enabled) {
+	if (enabled) {
+		const { error } = await supabase.from('agent_skills').upsert({ agent_id: agentId, skill_id: skillId }, { onConflict: 'agent_id,skill_id' });
+		if (error) throw error;
+	} else {
+		const { error } = await supabase.from('agent_skills').delete().eq('agent_id', agentId).eq('skill_id', skillId);
+		if (error) throw error;
+	}
 }
 
 // ============================================================

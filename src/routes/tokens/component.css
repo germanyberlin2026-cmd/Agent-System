@@ -1,0 +1,190 @@
+/* ══════════════════════════════════════════
+   COMPONENT TOKENS
+   Source of truth: Figma "component" collection (button, sidebar, input,
+   card, dropdown). These alias semantic tokens (colors) and primitives
+   (spacing/radius/border-width/line-height) — components should reference
+   these, never semantic/primitive tokens directly, so a component's look
+   can change in one place.
+
+   Not @theme: these aren't meant to become Tailwind utilities, only
+   var()-consumed by the component classes in layout.css / component
+   <style> blocks.
+
+   button.content.* (icon-left/icon-right/show-label/icon-only/disabled,
+   and the demo label.* strings) are Figma variant-boolean/sample-content
+   props, not style values — intentionally not ported here.
+══════════════════════════════════════════ */
+
+:root {
+  /* button.color.primary */
+  --button-color-primary-bg-default: var(--color-action-primary);
+  --button-color-primary-bg-hover: var(--color-action-primary-hover);
+  --button-color-primary-bg-active: var(--color-action-primary-active);
+  --button-color-primary-text-default: var(--color-action-primary-text);
+  --button-color-primary-icon-default: var(--color-action-primary-icon);
+  --button-color-primary-border-default: var(--color-action-primary);
+  --button-color-primary-border-hover: var(--color-action-primary-hover);
+  --button-color-primary-border-active: var(--color-action-primary-active);
+  --button-color-primary-focus-ring: var(--color-border-fokus);
+
+  /* button.color.secondary */
+  --button-color-secondary-bg-default: var(--color-action-secondary);
+  --button-color-secondary-bg-hover: var(--color-action-secondary-hover);
+  --button-color-secondary-bg-active: var(--color-action-secondary-active);
+  --button-color-secondary-text-default: var(--color-action-secondary-text);
+  --button-color-secondary-icon-default: var(--color-action-secondary-icon);
+  --button-color-secondary-border-default: var(--color-action-secondary-border);
+  --button-color-secondary-border-hover: var(--color-action-secondary-border-hover);
+  --button-color-secondary-border-active: var(--color-action-secondary-border-active);
+  --button-color-secondary-focus-ring: var(--color-action-secondary-fokus);
+
+  /* button.color.tertiary */
+  --button-color-tertiary-bg-default: var(--color-action-tertiary);
+  --button-color-tertiary-bg-hover: var(--color-action-tertiary-hover);
+  --button-color-tertiary-bg-active: var(--color-action-tertiary-active);
+  --button-color-tertiary-text-default: var(--color-action-tertiary-text);
+  --button-color-tertiary-icon-default: var(--color-action-tertiary-icon);
+  --button-color-tertiary-border-default: var(--color-border-default);
+  --button-color-tertiary-border-hover: var(--color-border-disabled);
+  --button-color-tertiary-border-active: var(--color-border-strong);
+  --button-color-tertiary-focus-ring: var(--color-border-fokus);
+
+  /* button.color.ghost */
+  --button-color-ghost-bg-default: var(--color-action-ghost);
+  --button-color-ghost-bg-hover: var(--color-action-ghost-hover);
+  --button-color-ghost-bg-active: var(--color-action-ghost-active);
+  --button-color-ghost-text-default: var(--color-text-primary);
+  --button-color-ghost-icon-default: var(--color-text-primary);
+  --button-color-ghost-border: transparent;
+  --button-color-ghost-focus-ring: var(--color-border-fokus);
+
+  /* button.color.danger */
+  --button-color-danger-bg-default: var(--color-status-danger-default);
+  --button-color-danger-bg-hover: var(--color-action-danger-hover);
+  --button-color-danger-bg-active: var(--color-action-danger-active);
+  --button-color-danger-text-default: var(--color-action-danger-text);
+  --button-color-danger-icon-default: var(--color-action-danger-icon);
+  --button-color-danger-border-default: var(--color-status-danger-default);
+  --button-color-danger-border-hover: var(--color-status-danger-border);
+  --button-color-danger-border-active: var(--color-status-danger-text);
+  --button-color-danger-focus-ring: var(--color-action-danger-fokus);
+
+  /* button.color.warning */
+  --button-color-warning-bg-default: var(--color-status-warning-default);
+  --button-color-warning-bg-hover: var(--color-action-warning-hover);
+  --button-color-warning-bg-active: var(--color-action-warning-active);
+  --button-color-warning-text-default: var(--color-action-warning-text);
+  --button-color-warning-icon-default: var(--color-action-warning-icon);
+  --button-color-warning-border-default: var(--color-status-warning-default);
+  --button-color-warning-border-hover: var(--color-status-warning-border);
+  --button-color-warning-border-active: var(--color-status-warning-text);
+  --button-color-warning-focus-ring: var(--color-action-warning-fokus);
+
+  /* button.color.success */
+  --button-color-success-bg-default: var(--color-status-success-default);
+  --button-color-success-bg-hover: var(--color-action-success-hover);
+  --button-color-success-bg-active: var(--color-action-success-active);
+  --button-color-success-text-default: var(--color-action-success-text);
+  --button-color-success-icon-default: var(--color-action-success-icon);
+  --button-color-success-border-default: var(--color-status-success-default);
+  --button-color-success-border-hover: var(--color-status-success-border);
+  --button-color-success-border-active: var(--color-status-success-text);
+  --button-color-success-focus-ring: var(--color-action-success-fokus);
+
+  /* button.color.disabled */
+  --button-color-disabled-bg: var(--color-action-disabled-bg);
+  --button-color-disabled-text: var(--color-action-disabled-text);
+  --button-color-disabled-border: var(--color-border-disabled);
+
+  /* button.size — derived from the primitive spacing scale */
+  --button-size-sm-height: calc(var(--spacing) * 6);
+  --button-size-sm-padding-x: calc(var(--spacing) * 3);
+  --button-size-sm-padding-x-icon-only: calc(var(--spacing) * 1);
+  --button-size-sm-padding-y: calc(var(--spacing) * 1);
+  --button-size-sm-gap: calc(var(--spacing) * 1);
+  --button-size-sm-icon-size: calc(var(--spacing) * 4);
+
+  --button-size-md-height: calc(var(--spacing) * 8);
+  --button-size-md-padding-x: calc(var(--spacing) * 4);
+  --button-size-md-padding-x-icon-only: calc(var(--spacing) * 2);
+  --button-size-md-padding-y: calc(var(--spacing) * 2);
+  --button-size-md-gap: calc(var(--spacing) * 2);
+  --button-size-md-icon-size: calc(var(--spacing) * 5);
+
+  --button-size-lg-height: calc(var(--spacing) * 12);
+  --button-size-lg-padding-x: calc(var(--spacing) * 6);
+  --button-size-lg-padding-x-icon-only: calc(var(--spacing) * 4);
+  --button-size-lg-padding-y: calc(var(--spacing) * 3);
+  --button-size-lg-gap: calc(var(--spacing) * 2);
+  --button-size-lg-icon-size: calc(var(--spacing) * 6);
+
+  /* button.radius / border / font / line-height / focus / shadow */
+  --button-radius-default: var(--radius-sm);
+  --button-radius-pill: var(--radius-full);
+  --button-radius-square: var(--radius-none);
+
+  --button-border-width-default: var(--p-border-width-1);
+  --button-border-width-focus: var(--p-border-width-2);
+
+  --button-font-family: var(--font-sans);
+  --button-font-weight: var(--font-weight-medium);
+  --button-font-size-sm: var(--text-xs);
+  --button-font-size-md: var(--text-sm);
+  --button-font-size-lg: var(--text-md);
+
+  --button-line-height-sm: var(--p-line-height-xs);
+  --button-line-height-md: var(--p-line-height-sm);
+  --button-line-height-lg: var(--p-line-height-md);
+
+  --button-focus-ring-width: var(--p-border-width-2);
+  --button-focus-ring-offset: var(--p-border-width-2);
+  --button-focus-ring-color: var(--color-border-fokus);
+
+  --button-shadow-default: var(--shadow-none);
+  --button-shadow-hover: var(--shadow-sm);
+  --button-shadow-active: var(--shadow-none);
+  --button-shadow-focus: 0 0 0 var(--button-focus-ring-width) color-mix(in srgb, var(--button-focus-ring-color) var(--p-opacity-40), transparent);
+
+  /* sidebar */
+  --sidebar-surface: var(--color-surface-default);
+  --sidebar-border: var(--color-border-subtle);
+  --sidebar-menu-item-icon: var(--color-text-secondary);
+  --sidebar-menu-item-text: var(--color-text-secondary);
+  --sidebar-menu-item-icon-hover: var(--color-text-primary);
+  --sidebar-menu-item-text-hover: var(--color-text-primary);
+  --sidebar-menu-item-icon-active: var(--color-text-inverse);
+  --sidebar-menu-item-text-active: var(--color-text-inverse);
+  --sidebar-menu-item-background-active: var(--color-text-secondary);
+  --sidebar-menu-item-logo-bg: var(--color-text-secondary);
+  --sidebar-menu-item-logo: var(--color-background-muted);
+  --sidebar-menu-item-logo-text-primary: var(--color-text-primary);
+  --sidebar-menu-item-logo-text-secondary: var(--color-text-secondary);
+
+  /* input */
+  --input-surface: var(--color-surface-overlay);
+  --input-border: var(--color-border-default);
+
+  /* card */
+  --card-radius: var(--radius-sm);
+  --card-x-padding: calc(var(--spacing) * 3);
+  --card-y-padding: calc(var(--spacing) * 3);
+  --card-color-surface: var(--color-surface-default);
+  --card-color-border: var(--color-border-subtle);
+  --card-color-icon: var(--color-text-secondary);
+  --card-color-text: var(--color-text-secondary);
+  --card-color-title: var(--color-text-primary);
+
+  /* dropdown.trigger */
+  --dropdown-trigger-bg-default: var(--color-surface-default);
+  --dropdown-trigger-bg-hover: var(--color-action-secondary-hover);
+  --dropdown-trigger-bg-active: var(--color-action-secondary-active);
+  --dropdown-trigger-bg-disabled: var(--color-action-disabled-bg);
+  --dropdown-trigger-border-default: var(--color-border-default);
+  --dropdown-trigger-border-hover: var(--color-border-strong);
+  --dropdown-trigger-border-focus: var(--color-border-fokus);
+  --dropdown-trigger-text-default: var(--color-text-primary);
+  --dropdown-trigger-text-placeholder: var(--color-text-muted);
+  --dropdown-trigger-text-disabled: var(--color-action-disabled-text);
+  --dropdown-trigger-icon-default: var(--color-text-secondary);
+  --dropdown-trigger-icon-disabled: var(--color-action-disabled-text);
+}
