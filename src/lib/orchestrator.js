@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './env.js';
 import {
 	fetchKnowledge,
 	saveKnowledge,
@@ -15,13 +16,13 @@ import {
 } from './api.js';
 import { ROUTING_STRATEGIES, VALIDATION_STRATEGIES } from './constants.js';
 
-const EDGE_FUNCTION_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+const EDGE_FUNCTION_BASE = `${SUPABASE_URL}/functions/v1`;
 
 function getAuthHeaders() {
 	return {
-		Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+		Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
 		'Content-Type': 'application/json',
-		apikey: import.meta.env.VITE_SUPABASE_ANON_KEY
+		apikey: SUPABASE_ANON_KEY
 	};
 }
 
