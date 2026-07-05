@@ -271,3 +271,27 @@ export function getModelInfo(provider, modelId) {
 		description: 'Model information not available.'
 	};
 }
+
+export const AGENT_MODEL_PREFERENCES = {
+	scanner:      { priority: 'context', reason: 'Long context and low cost for full-project scans',  minIntelligence: 'medium',  preferSpeed: true,  preferLowCost: true,  keywords: ['Large documents', 'Context-heavy tasks', 'Quick analysis'] },
+	orchestrator: { priority: 'reasoning', reason: 'Strong reasoning and planning for task routing', minIntelligence: 'high',    preferSpeed: false, preferLowCost: false, keywords: ['Complex reasoning', 'Architecture', 'Expert analysis'] },
+	architect:    { priority: 'reasoning', reason: 'Deep reasoning for design and structure',         minIntelligence: 'high',    preferSpeed: false, preferLowCost: false, keywords: ['Architecture', 'Complex reasoning', 'Security review'] },
+	coder:        { priority: 'quality',   reason: 'Strong code generation quality',                  minIntelligence: 'high',    preferSpeed: true,  preferLowCost: false, keywords: ['Code generation', 'Testing', 'General tasks'] },
+	tester:       { priority: 'speed',     reason: 'Fast, deterministic validation',                  minIntelligence: 'medium',   preferSpeed: true,  preferLowCost: true,  keywords: ['Testing', 'Quick tasks', 'Simple tasks'] },
+	reviewer:     { priority: 'reasoning', reason: 'Strong reasoning for code review',                minIntelligence: 'high',    preferSpeed: false, preferLowCost: false, keywords: ['Code review', 'Security review', 'Complex reasoning'] },
+	documenter:   { priority: 'speed',     reason: 'Fast writing and documentation',                 minIntelligence: 'medium',   preferSpeed: true,  preferLowCost: true,  keywords: ['Documentation', 'Quick tasks', 'Light coding'] },
+	debugger:     { priority: 'reasoning', reason: 'Strong reasoning for runtime diagnosis',          minIntelligence: 'high',    preferSpeed: false, preferLowCost: false, keywords: ['Advanced debugging', 'Complex reasoning', 'Expert analysis'] }
+};
+
+const INTELLIGENCE_RANK = { 'unknown': 0, 'low': 1, 'medium': 2, 'medium-high': 3, 'high': 4, 'very-high': 5 };
+
+export function getModelRecommendation(role, modelInfo) {
+	const pref = AGENT_MODEL_PREFERENCES[role];
+	if (!pref) return { level: 'neutral', reason: 'No preference defined for this role' };
+	const intelligence = INTELLIGENCE_RANK[modelInfo.intelligence] || 0;
+	const minIntelligence = INTELLIGENCE_RANK[pref.minIntelligence] || 0;
+	const keywordMatch = (modelInfo.bestFor || []).some((k) => pref.keywords.some((kw) => k.toLowerCase().includes(kw.toLowerCase().split(' ')[0])));
+	if (intelligence >= minIntelligence && keywordMatch) return { level: 'recommended', reason: pref.reason };
+	if (intelligence < minIntelligence) return { level: 'warning', reason: `Model may be too lightweight for ${role}. ${pref.reason}.` };
+	return { level: 'neutral', reason: 'Adequate but not optimal for this role' };
+}

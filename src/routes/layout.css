@@ -999,6 +999,69 @@
     line-height: 1.7;
   }
 
+  /* Capability meter — compact quality/speed/cost/context indicator */
+  .cap-meter {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .cap-meter-label {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+  }
+  .cap-meter-bar {
+    height: 4px;
+    border-radius: var(--radius-full);
+    background: var(--color-background-muted);
+    overflow: hidden;
+  }
+  .cap-meter-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: var(--color-action-primary);
+    transition: width 0.3s ease;
+  }
+  .cap-meter-fill.success { background: var(--color-status-success-default); }
+  .cap-meter-fill.warning { background: var(--color-status-warning-default); }
+  .cap-meter-fill.danger  { background: var(--color-status-danger-default); }
+  .cap-meter-value {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: capitalize;
+  }
+
+  /* Recommendation badge */
+  .rec-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--radius-full);
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .rec-recommended {
+    color: var(--color-status-success-text);
+    background: var(--color-status-success-background);
+    border: 1px solid var(--color-status-success-border);
+  }
+  .rec-warning {
+    color: var(--color-status-warning-text);
+    background: var(--color-status-warning-background);
+    border: 1px solid var(--color-status-warning-border);
+  }
+  .rec-neutral {
+    color: var(--color-text-muted);
+    background: var(--color-background-subtle);
+    border: 1px solid var(--color-border-default);
+  }
+
   /* Empty state */
   .empty-state {
     display: flex;
