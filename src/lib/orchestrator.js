@@ -30,7 +30,10 @@ function getAuthHeaders() {
 }
 
 async function callEdgeFunction(name, body) {
-	const targets = [`${SUPABASE_URL}/functions/v1/${name}`, `${LOCAL_EXECUTION_BASE}/${name}`];
+	// Prefer the application backend so execution uses the exact version shipped
+	// with this UI (including versioned prompt/skill composition). Edge Functions
+	// remain a deployment fallback when the app backend is unavailable.
+	const targets = [`${LOCAL_EXECUTION_BASE}/${name}`, `${SUPABASE_URL}/functions/v1/${name}`];
 	let lastError;
 	for (const target of targets) {
 		try {
@@ -50,6 +53,29 @@ async function callEdgeFunction(name, body) {
 		}
 	}
 	throw lastError || new Error(`Execution backend ${name} is unavailable`);
+}
+
+function normalizeOrchestratorTasks(rawTasks, agents, command) {
+	const values = Array.isArray(rawTasks) ? rawTasks : [];
+	return values.map((value, index) => {
+		const task = typeof value === 'string' ? { title: value } : (value || {});
+		const requestedRole = String(task.agent_role || task.role || task.assigned_role || '').toLowerCase();
+		const explicitAgent = agents.find((agent) => agent.id === task.agent_id || agent.name?.toLowerCase() === String(task.agent || task.agent_name || '').toLowerCase());
+		const agent = explicitAgent || agents.find((candidate) => candidate.role === requestedRole);
+		if (!agent) return null;
+		const title = String(task.title || task.name || task.objective || task.summary || `${agent.role} project analysis`).trim();
+		const description = String(task.description || task.instructions || task.objective || task.prompt || `Execute the ${agent.role} responsibility for: ${command}`).trim();
+		return {
+			...task,
+			title: title || `Task ${index + 1}`,
+			description,
+			agent_id: agent.id,
+			agent_role: agent.role,
+			input_payload: typeof task.input_payload === 'object' && task.input_payload ? task.input_payload : { command },
+			success_criteria: Array.isArray(task.success_criteria) && task.success_criteria.length ? task.success_criteria : ['Return grounded output based only on supplied project evidence'],
+			max_retries: Number.isInteger(task.max_retries) ? task.max_retries : 2
+		};
+	}).filter(Boolean);
 }
 
 // ============================================================
@@ -77,7 +103,7 @@ export async function runScanner(project) {
 		const knowledge = {
 			tech_stack: result.tech_stack || [],
 			entry_points: result.entry_points || [],
-			dependency_graph: result.dependency_graph || {},
+			dependency_graph: { ...(result.dependency_graph || {}), scan_details: result.scan_details || {} },
 			file_tree: result.file_tree || {},
 			documentation: result.documentation || [],
 			raw_summary: result.raw_summary || ''
@@ -158,7 +184,13 @@ export async function decomposeTasks(run, knowledge, routingStrategy) {
 		provider: orchestratorApiKey.provider
 	});
 
-	let tasks = result.tasks || [];
+	let tasks = normalizeOrchestratorTasks(result.tasks, agents.filter((agent) => agent.is_active), run.command);
+	if (!tasks.length) {
+		const fallbackAgent = agents.find((agent) => agent.is_active && agent.role === 'reviewer') || agents.find((agent) => agent.is_active && agent.role === 'architect') || agents.find((agent) => agent.is_active);
+		if (!fallbackAgent) throw new Error('No active agent is available for this command');
+		tasks = [{ title: 'Analyze project request', description: `Produce a grounded response for: ${run.command}`, agent_id: fallbackAgent.id, agent_role: fallbackAgent.role, input_payload: { command: run.command }, success_criteria: ['Uses only verified project context', 'Directly answers every part of the request'], max_retries: 2 }];
+		await addRunLog(run.id, 'warn', 'Orchestrator returned no valid tasks; a safe analysis fallback was created');
+	}
 	const mutationRequested = /change|update|fix|implement|create|remove|redesign|შეცვალ|გაასწორ|შექმენ|წაშალ|დიზაინ/i.test(run.command);
 	if (!/documentation|document|docs|readme|დოკუმენტ/i.test(run.command)) {
 		tasks = tasks.filter((task) => task.agent_role !== 'documenter');
@@ -199,7 +231,8 @@ export async function decomposeTasks(run, knowledge, routingStrategy) {
 				...(task.input_payload || {}),
 				depends_on: dependencyIds,
 				success_criteria: task.success_criteria || ['Output matches the requested task and contains no invented claims'],
-				skills: selectedSkills.map((skill) => skill.name)
+				skills: selectedSkills.map((skill) => skill.name),
+				skill_versions: selectedSkills.map((skill) => ({ id: skill.id, name: skill.name, version: skill.version }))
 			},
 			max_retries: task.max_retries || 3
 		});
@@ -242,6 +275,10 @@ export async function executeTask(task, run, knowledge) {
 
 	await updateTask(task.id, { status: 'running', started_at: new Date().toISOString() });
 	await addTaskLog(task.id, 'info', `Agent "${agent.name}" starting execution`);
+	await addTaskLog(task.id, 'info', `Execution context locked: agent prompt + ${selectedSkills.length} active skill(s)`, {
+		agent_id: agent.id, agent_prompt_present: Boolean(agent.system_prompt),
+		skills: selectedSkills.map((skill) => ({ id: skill.id, name: skill.name, version: skill.version }))
+	});
 
 	if (agent.role === 'tester' && knowledge?.file_tree?.root) {
 		const response = await fetch('/api/tool-execute', {
@@ -300,7 +337,8 @@ export async function executeTask(task, run, knowledge) {
 					...knowledge,
 					verified_files: verifiedFiles,
 					selected_skills: selectedSkills.map((skill) => ({
-						name: skill.name, instructions: skill.instructions, allowed_tools: skill.allowed_tools,
+						id: skill.id, name: skill.name, version: skill.version, purpose: skill.purpose, when_to_use: skill.when_to_use, when_not_to_use: skill.when_not_to_use,
+						instructions: skill.instructions, allowed_tools: skill.allowed_tools,
 						input_schema: skill.input_schema, output_schema: skill.output_schema, success_criteria: skill.success_criteria
 					})),
 					execution_rules: [
@@ -578,7 +616,8 @@ export async function aggregateAndDeliver(run, tasks, validationResult) {
 
 export async function runFullPipeline(project, command, options = {}) {
 	const routingStrategy = options.routing_strategy || ROUTING_STRATEGIES.RULE_BASED;
-	const validationStrategy = options.validation_strategy || VALIDATION_STRATEGIES.SCHEMA_VALIDATION;
+	const validationStrategies = options.validation_strategies?.length ? options.validation_strategies : [options.validation_strategy || VALIDATION_STRATEGIES.SCHEMA_VALIDATION];
+	const validationStrategy = validationStrategies.join(',');
 	const concurrency = options.concurrency || 3;
 
 	const knowledge = await fetchKnowledge(project.id);
@@ -600,7 +639,13 @@ export async function runFullPipeline(project, command, options = {}) {
 		await executeAllTasks(tasks, run, knowledge, concurrency);
 
 		const refreshedTasks = await fetchTasks(run.id);
-		const validationResult = await validateRun(run, refreshedTasks, knowledge, validationStrategy);
+		const validationResults = [];
+		for (const strategy of validationStrategies) validationResults.push(await validateRun(run, refreshedTasks, knowledge, strategy));
+		const validationResult = {
+			passed: validationResults.every((result) => result.passed),
+			summary: validationResults.map((result, index) => `${validationStrategies[index]}: ${result.summary}`).join(' · '),
+			details: validationResults.flatMap((result, index) => (result.details || []).map((detail) => ({ strategy: validationStrategies[index], ...detail })))
+		};
 		const finalOutput = await aggregateAndDeliver(run, refreshedTasks, validationResult);
 
 		return { run, finalOutput };

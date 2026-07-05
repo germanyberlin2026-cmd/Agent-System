@@ -29,21 +29,36 @@ export async function createAgent(agent) {
 		.select()
 		.single();
 	if (error) throw error;
+	let { error: versionError } = await supabase.from('prompt_versions').insert({
+		agent_id: data.id, version: 1, system_prompt: data.system_prompt,
+		input_schema: data.input_schema || {}, output_schema: data.output_schema || {},
+		change_reason: 'Initial agent contract', is_active: true
+	});
+	if (versionError && /column|schema cache/i.test(versionError.message || '')) {
+		({ error: versionError } = await supabase.from('prompt_versions').insert({ agent_id: data.id, version: 1, system_prompt: data.system_prompt, change_reason: 'Initial agent contract', is_active: true }));
+	}
+	if (versionError) throw versionError;
 	return data;
 }
 
 export async function updateAgent(id, updates) {
 	if (updates.system_prompt !== undefined) {
-		const { data: current } = await supabase.from('agents').select('system_prompt').eq('id', id).maybeSingle();
+		const { data: current } = await supabase.from('agents').select('system_prompt,input_schema,output_schema').eq('id', id).maybeSingle();
 		const { data: versions, error: versionReadError } = await supabase
 			.from('prompt_versions').select('version').eq('agent_id', id).order('version', { ascending: false }).limit(1);
 		if (!versionReadError) {
 			const nextVersion = (versions?.[0]?.version || 0) + 1;
 			await supabase.from('prompt_versions').update({ is_active: false }).eq('agent_id', id);
-			await supabase.from('prompt_versions').insert({
+			let { error: promptVersionError } = await supabase.from('prompt_versions').insert({
 				agent_id: id, version: nextVersion, system_prompt: updates.system_prompt,
+				input_schema: updates.input_schema || current?.input_schema || {},
+				output_schema: updates.output_schema || current?.output_schema || {},
 				change_reason: updates.change_reason || (current?.system_prompt ? 'Agent prompt updated' : 'Initial prompt'), is_active: true
 			});
+			if (promptVersionError && /column|schema cache/i.test(promptVersionError.message || '')) {
+				({ error: promptVersionError } = await supabase.from('prompt_versions').insert({ agent_id: id, version: nextVersion, system_prompt: updates.system_prompt, change_reason: updates.change_reason || 'Agent prompt updated', is_active: true }));
+			}
+			if (promptVersionError) throw promptVersionError;
 		}
 	}
 	const cleanUpdates = { ...updates };
@@ -67,7 +82,7 @@ export async function fetchPromptVersions(agentId) {
 export async function rollbackPromptVersion(agentId, version) {
 	const { data: target, error } = await supabase.from('prompt_versions').select('*').eq('agent_id', agentId).eq('version', version).single();
 	if (error) throw error;
-	return updateAgent(agentId, { system_prompt: target.system_prompt, change_reason: `Rollback to v${version}` });
+	return updateAgent(agentId, { system_prompt: target.system_prompt, input_schema: target.input_schema || {}, output_schema: target.output_schema || {}, change_reason: `Rollback to v${version}` });
 }
 
 export async function deleteAgent(id) {
@@ -223,7 +238,10 @@ export async function removeAssignment(agentId) {
 export async function fetchSkills() {
 	const { data, error } = await supabase.from('skills').select('*').order('name');
 	if (error) throw new Error(`Skill registry could not be loaded: ${error.message}`);
-	return data || [];
+	return (data || []).map((skill) => {
+		const registry = skill.input_schema?._registry || {};
+		return { ...registry, ...skill, input_schema: skill.input_schema?._contract || skill.input_schema || {} };
+	});
 }
 
 export async function fetchAgentSkills() {
@@ -236,27 +254,84 @@ export async function createSkill(skill) {
 	const payload = {
 		name: skill.name,
 		description: skill.description || '',
+		category: skill.category || 'general',
+		purpose: skill.purpose || '',
+		when_to_use: skill.when_to_use || '',
+		when_not_to_use: skill.when_not_to_use || '',
 		instructions: skill.instructions,
 		allowed_tools: skill.allowed_tools || [],
 		success_criteria: skill.success_criteria || [],
 		input_schema: skill.input_schema || {},
 		output_schema: skill.output_schema || {},
-		is_active: true
+		examples: skill.examples || [],
+		changelog: skill.changelog || 'Initial version',
+		status: skill.status || 'active',
+		source_format: skill.source_format || 'manual',
+		is_active: (skill.status || 'active') === 'active'
 	};
-	const { data, error } = await supabase.from('skills').insert(payload).select().single();
+	let { data, error } = await supabase.from('skills').insert(payload).select().single();
+	if (error && /column|schema cache/i.test(error.message || '')) {
+		const legacyPayload = {
+			name: payload.name, description: payload.description, instructions: payload.instructions,
+			allowed_tools: payload.allowed_tools, success_criteria: payload.success_criteria,
+			input_schema: { _contract: payload.input_schema, _registry: { category: payload.category, purpose: payload.purpose, when_to_use: payload.when_to_use, when_not_to_use: payload.when_not_to_use, examples: payload.examples, changelog: payload.changelog, status: payload.status, source_format: payload.source_format } },
+			output_schema: payload.output_schema, is_active: payload.is_active
+		};
+		({ data, error } = await supabase.from('skills').insert(legacyPayload).select().single());
+	}
 	if (error) throw error;
+	await supabase.from('skill_versions').insert({ skill_id: data.id, version: data.version || 1, snapshot: data, change_reason: 'Initial version' }).then(() => {}, () => {});
 	return data;
 }
 
 export async function updateSkill(id, updates) {
-	const { data, error } = await supabase.from('skills').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+	const changeReason = updates.change_reason || 'Skill updated';
+	const payload = { ...updates };
+	delete payload.change_reason;
+	if (payload.status) payload.is_active = payload.status === 'active';
+	let { data, error } = await supabase.rpc('update_skill_versioned', { p_skill_id: id, p_updates: payload, p_change_reason: changeReason });
+	if (error && /function|schema cache|could not find/i.test(error.message || '')) {
+		const legacyUpdates = {
+			name: payload.name, description: payload.description, instructions: payload.instructions,
+			allowed_tools: payload.allowed_tools, success_criteria: payload.success_criteria,
+			input_schema: { _contract: payload.input_schema || {}, _registry: { category: payload.category, purpose: payload.purpose, when_to_use: payload.when_to_use, when_not_to_use: payload.when_not_to_use, examples: payload.examples, changelog: payload.changelog, status: payload.status, source_format: payload.source_format } },
+			output_schema: payload.output_schema, is_active: payload.is_active, updated_at: new Date().toISOString()
+		};
+		({ data, error } = await supabase.from('skills').update(legacyUpdates).eq('id', id).select().single());
+	}
 	if (error) throw error;
-	return data;
+	return Array.isArray(data) ? data[0] : data;
 }
 
-export async function setAgentSkill(agentId, skillId, enabled) {
+export async function deleteSkill(id) {
+	const { error } = await supabase.from('skills').delete().eq('id', id);
+	if (error) throw error;
+}
+
+export async function fetchSkillVersions(skillId) {
+	const { data, error } = await supabase.from('skill_versions').select('*').eq('skill_id', skillId).order('version', { ascending: false });
+	if (error && /relation|schema cache|could not find/i.test(error.message || '')) return [];
+	if (error) throw error;
+	return data || [];
+}
+
+export async function rollbackSkillVersion(skillId, versionId) {
+	const { data: version, error } = await supabase.from('skill_versions').select('*').eq('id', versionId).single();
+	if (error) throw error;
+	const snapshot = { ...version.snapshot, change_reason: `Rollback to v${version.version}` };
+	delete snapshot.id; delete snapshot.created_at; delete snapshot.updated_at; delete snapshot.version;
+	return updateSkill(skillId, snapshot);
+}
+
+export async function duplicateSkill(skill) {
+	const copy = { ...skill, name: `${skill.name}-copy`, status: 'draft', source_format: 'duplicate' };
+	delete copy.id; delete copy.created_at; delete copy.updated_at; delete copy.version;
+	return createSkill(copy);
+}
+
+export async function setAgentSkill(agentId, skillId, enabled, priority = 100) {
 	if (enabled) {
-		const { error } = await supabase.from('agent_skills').upsert({ agent_id: agentId, skill_id: skillId }, { onConflict: 'agent_id,skill_id' });
+		const { error } = await supabase.from('agent_skills').upsert({ agent_id: agentId, skill_id: skillId, priority }, { onConflict: 'agent_id,skill_id' });
 		if (error) throw error;
 	} else {
 		const { error } = await supabase.from('agent_skills').delete().eq('agent_id', agentId).eq('skill_id', skillId);
@@ -424,6 +499,7 @@ export async function fetchTasks(runId) {
 }
 
 export async function createTask(task) {
+	if (!task?.title?.trim()) throw new Error('Task title is required before database insertion');
 	const { data, error } = await supabase
 		.from('tasks')
 		.insert({

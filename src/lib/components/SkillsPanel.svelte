@@ -1,420 +1,155 @@
 <script>
-	import { Zap, Plus, X, Pencil, FileCode2, Loader2, AlertTriangle, Circle, ChevronDown } from '@lucide/svelte';
+	import { Plus, Upload, Pencil, Copy, Trash2, ChevronDown, History, Save, X, ShieldCheck, Wrench, Users, RotateCcw } from '@lucide/svelte';
 	import { skills, agentSkills, agents, addToast } from '../stores.js';
-	import { fetchSkills, fetchAgentSkills, createSkill, updateSkill, setAgentSkill } from '../api.js';
+	import { fetchSkills, fetchAgentSkills, createSkill, updateSkill, deleteSkill, duplicateSkill, setAgentSkill, fetchSkillVersions, rollbackSkillVersion } from '../api.js';
 
 	let { loadError = '' } = $props();
-	let showCreate = $state(false);
-	let sourceMode = $state('text');
-	let name = $state('');
-	let description = $state('');
-	let instructions = $state('');
-	let markdownPath = $state('');
+	let expandedId = $state(null);
+	let editorOpen = $state(false);
+	let editingId = $state(null);
 	let saving = $state(false);
-	let expandedSkill = $state(null);
+	let versions = $state([]);
+	let uploadInput;
+	let form = $state(emptyForm());
 
-	async function saveSkill() {
+	function emptyForm() {
+		return { name: '', category: 'general', status: 'draft', description: '', purpose: '', when_to_use: '', when_not_to_use: '', instructions: '', allowed_tools_text: '', success_criteria_text: '', examples_text: '', input_schema_text: '{}', output_schema_text: '{}', changelog: '', source_format: 'manual', change_reason: '' };
+	}
+
+	function arrayText(value) { return Array.isArray(value) ? value.join('\n') : ''; }
+	function lines(value) { return value.split('\n').map((item) => item.trim()).filter(Boolean); }
+	function parseJson(value, label) {
+		try { return JSON.parse(value || '{}'); }
+		catch { throw new Error(`${label} must be valid JSON`); }
+	}
+	function assignedAgents(skillId) { return $agentSkills.filter((item) => item.skill_id === skillId); }
+	function isAssigned(agentId, skillId) { return $agentSkills.some((item) => item.agent_id === agentId && item.skill_id === skillId); }
+
+	function openCreate() {
+		editingId = null; form = emptyForm(); editorOpen = true; versions = [];
+	}
+
+	async function openEdit(skill) {
+		editingId = skill.id;
+		form = {
+			name: skill.name || '', category: skill.category || 'general', status: skill.status || (skill.is_active ? 'active' : 'disabled'),
+			description: skill.description || '', purpose: skill.purpose || '', when_to_use: skill.when_to_use || '', when_not_to_use: skill.when_not_to_use || '',
+			instructions: skill.instructions || '', allowed_tools_text: arrayText(skill.allowed_tools), success_criteria_text: arrayText(skill.success_criteria),
+			examples_text: arrayText(skill.examples), input_schema_text: JSON.stringify(skill.input_schema || {}, null, 2), output_schema_text: JSON.stringify(skill.output_schema || {}, null, 2),
+			changelog: skill.changelog || '', source_format: skill.source_format || 'manual', change_reason: ''
+		};
+		versions = await fetchSkillVersions(skill.id).catch(() => []);
+		editorOpen = true;
+	}
+
+	async function save() {
+		if (!form.name.trim() || !form.instructions.trim()) return addToast('Name and policy instructions are required', 'error');
 		saving = true;
 		try {
-			let payload = { name: name.trim(), description: description.trim(), instructions: instructions.trim() };
-			if (sourceMode === 'markdown') {
-				const response = await fetch('/api/skills/import', {
-					method: 'POST', headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ file_path: markdownPath.trim() })
-				});
-				payload = await response.json();
-				if (!response.ok) throw new Error(payload.error || 'Markdown import failed');
-				payload.input_schema = { _skill_source: { type: payload.source_type, path: payload.source_path } };
-			}
-			if (!payload.name || !payload.instructions) throw new Error('Name and instructions are required');
-			await createSkill(payload);
-			skills.set(await fetchSkills());
-			name = ''; description = ''; instructions = ''; markdownPath = ''; showCreate = false;
-			addToast('Skill created', 'success');
-		} catch (error) {
-			addToast(error.message, 'error');
-		} finally {
-			saving = false;
-		}
+			const payload = {
+				name: form.name.trim(), category: form.category.trim() || 'general', status: form.status, description: form.description.trim(), purpose: form.purpose.trim(),
+				when_to_use: form.when_to_use.trim(), when_not_to_use: form.when_not_to_use.trim(), instructions: form.instructions.trim(),
+				allowed_tools: lines(form.allowed_tools_text), success_criteria: lines(form.success_criteria_text), examples: lines(form.examples_text),
+				input_schema: parseJson(form.input_schema_text, 'Input contract'), output_schema: parseJson(form.output_schema_text, 'Output contract'),
+				changelog: form.changelog.trim(), source_format: form.source_format, change_reason: form.change_reason.trim() || (editingId ? 'Skill policy updated' : 'Initial version')
+			};
+			if (editingId) await updateSkill(editingId, payload); else await createSkill(payload);
+			skills.set(await fetchSkills()); editorOpen = false;
+			addToast(editingId ? 'Skill version saved' : 'Skill created', 'success');
+		} catch (error) { addToast(error.message, 'error'); }
+		finally { saving = false; }
 	}
 
-	async function toggleSkill(skill) {
-		await updateSkill(skill.id, { is_active: !skill.is_active });
-		skills.set(await fetchSkills());
-	}
-
-	async function toggleAssignment(agentId, skillId, enabled) {
+	async function importFile(event) {
+		const file = event.currentTarget.files?.[0]; if (!file) return;
 		try {
-			await setAgentSkill(agentId, skillId, enabled);
-			agentSkills.set(await fetchAgentSkills());
-		} catch (error) {
-			addToast(error.message, 'error');
-		}
+			const text = await file.text(); openCreate(); form.source_format = file.name.split('.').pop()?.toLowerCase() || 'text'; form.name = file.name.replace(/\.[^.]+$/, '');
+			if (file.name.toLowerCase().endsWith('.json')) {
+				const value = JSON.parse(text); Object.assign(form, {
+					name: value.name || form.name, category: value.category || 'general', description: value.description || '', purpose: value.purpose || '',
+					when_to_use: value.when_to_use || '', when_not_to_use: value.when_not_to_use || '', instructions: value.instructions || value.policy || '',
+					allowed_tools_text: arrayText(value.allowed_tools), success_criteria_text: arrayText(value.success_criteria), examples_text: arrayText(value.examples),
+					input_schema_text: JSON.stringify(value.input_schema || {}, null, 2), output_schema_text: JSON.stringify(value.output_schema || {}, null, 2)
+				});
+			} else {
+				const frontmatter = text.match(/^---\s*([\s\S]*?)\s*---\s*/);
+				form.name = frontmatter?.[1]?.match(/^name:\s*(.+)$/m)?.[1]?.trim() || form.name;
+				form.description = frontmatter?.[1]?.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
+				form.instructions = frontmatter ? text.slice(frontmatter[0].length).trim() : text;
+			}
+			addToast('Skill loaded. Review the policy and contracts before saving.', 'success');
+		} catch (error) { addToast(`Import failed: ${error.message}`, 'error'); }
 	}
 
-	function assigned(agentId, skillId) {
-		return $agentSkills.some(item => item.agent_id === agentId && item.skill_id === skillId);
+	async function remove(skill) {
+		if (!confirm(`Delete skill “${skill.name}”? Agent assignments and version history will also be removed.`)) return;
+		try { await deleteSkill(skill.id); skills.set(await fetchSkills()); agentSkills.set(await fetchAgentSkills()); addToast('Skill deleted', 'success'); }
+		catch (error) { addToast(error.message, 'error'); }
 	}
 
-	function getAssignedCount(skillId) {
-		return $agentSkills.filter(item => item.skill_id === skillId).length;
+	async function copySkill(skill) {
+		try { await duplicateSkill(skill); skills.set(await fetchSkills()); addToast('Draft copy created', 'success'); }
+		catch (error) { addToast(error.message, 'error'); }
+	}
+
+	async function assign(agentId, skillId, enabled) {
+		try { await setAgentSkill(agentId, skillId, enabled); agentSkills.set(await fetchAgentSkills()); addToast(enabled ? 'Skill assigned' : 'Skill unassigned', 'success'); }
+		catch (error) { addToast(error.message, 'error'); }
+	}
+
+	async function rollback(versionId) {
+		try { await rollbackSkillVersion(editingId, versionId); skills.set(await fetchSkills()); const skill = $skills.find((item) => item.id === editingId); await openEdit(skill); addToast('Skill restored as a new version', 'success'); }
+		catch (error) { addToast(error.message, 'error'); }
 	}
 </script>
 
-<div class="skills-studio">
-	<!-- Header -->
-	<div class="studio-header">
-		<div class="studio-info">
-			<div class="studio-count">{$skills.length} skills</div>
-			{#if $skills.length > 0}
-				<div class="studio-active">{$skills.filter(s => s.is_active).length} active</div>
-			{/if}
-		</div>
-		<button class="btn btn-primary" onclick={() => showCreate = !showCreate}>
-			{#if showCreate}
-				<X size={14} strokeWidth={2} /> Cancel
-			{:else}
-				<Plus size={14} strokeWidth={2} /> Add Skill
-			{/if}
-		</button>
-	</div>
+<input class="sr-only" bind:this={uploadInput} type="file" accept=".md,.txt,.json" onchange={importFile} aria-label="Upload skill file" />
 
-	<!-- Create form -->
-	{#if showCreate}
-		<div class="create-card fade-in-up">
-			<div class="create-header">
-				<div class="mode-tabs">
-					<button class="mode-tab {sourceMode === 'text' ? 'active' : ''}" onclick={() => sourceMode = 'text'}>
-						<Pencil size={13} strokeWidth={2} /> Manual
-					</button>
-					<button class="mode-tab {sourceMode === 'markdown' ? 'active' : ''}" onclick={() => sourceMode = 'markdown'}>
-						<FileCode2 size={13} strokeWidth={2} /> SKILL.md
-					</button>
-				</div>
-			</div>
-
-			{#if sourceMode === 'text'}
-				<div class="create-fields">
-					<div class="field-group">
-						<label class="label" for="skill-name">Skill Name</label>
-						<input id="skill-name" class="input" bind:value={name} placeholder="e.g. file-writer" />
-					</div>
-					<div class="field-group">
-						<label class="label" for="skill-desc">Description</label>
-						<input id="skill-desc" class="input" bind:value={description} placeholder="What this skill does and when to use it" />
-					</div>
-					<div class="field-group">
-						<label class="label" for="skill-instructions">Instructions</label>
-						<textarea id="skill-instructions" class="input" rows="5" bind:value={instructions} placeholder="Detailed skill instructions for the LLM..."></textarea>
-					</div>
-				</div>
-			{:else}
-				<div class="create-fields">
-					<div class="field-group">
-						<label class="label" for="skill-path">SKILL.md Path</label>
-						<input id="skill-path" class="input" bind:value={markdownPath} placeholder="C:\path\to\skills\SKILL.md" />
-						<div class="field-hint">Imports YAML frontmatter (name, description) and Markdown body as instructions</div>
-					</div>
-				</div>
-			{/if}
-
-			<button class="btn btn-primary" disabled={saving} onclick={saveSkill}>
-				{#if saving}
-					<Loader2 size={14} strokeWidth={2} class="spin" /> Saving...
-				{:else}
-					<Plus size={14} strokeWidth={2} /> Create Skill
-				{/if}
-			</button>
-		</div>
-	{/if}
-
-	<!-- Error state -->
-	{#if loadError}
-		<div class="error-card">
-			<div class="error-title"><AlertTriangle size={15} strokeWidth={2} /> Skill Registry Unavailable</div>
-			<div class="error-msg">{loadError}</div>
-			<div class="error-hint">Verify that VITE_SUPABASE_URL points to the project where the skill_registry migration was run, then reload the page.</div>
-		</div>
-	{:else if $skills.length === 0}
-		<div class="empty-state">
-					<div class="empty-state-icon"><Zap size={40} strokeWidth={1.5} /></div>
-			<div class="empty-state-title">No skills yet</div>
-			<div class="empty-state-desc">Skills extend your agents with specific capabilities, tool access, and behavioral policies.</div>
-		</div>
-	{:else}
-		<div class="skills-grid">
-			{#each $skills as skill (skill.id)}
-				{@const assignedCount = getAssignedCount(skill.id)}
-				<div class="skill-card {skill.is_active ? 'active' : 'inactive'} {expandedSkill === skill.id ? 'expanded' : ''}">
-					<div class="skill-top">
-						<div class="skill-icon">
-							{#if skill.is_active}
-								<Zap size={15} strokeWidth={2.5} />
-							{:else}
-								<Circle size={15} strokeWidth={2.5} />
-							{/if}
-						</div>
-						<div class="skill-info">
-							<div class="skill-name">{skill.name} <span class="skill-version">v{skill.version}</span></div>
-							<div class="skill-desc">{skill.description}</div>
-						</div>
-						<div class="skill-controls">
-							<!-- Toggle -->
-							<button
-								class="toggle-track {skill.is_active ? 'on' : ''}"
-								onclick={() => toggleSkill(skill)}
-								title="{skill.is_active ? 'Disable' : 'Enable'} skill"
-							>
-								<span class="toggle-thumb"></span>
-							</button>
-							<!-- Expand -->
-							<button
-								class="expand-btn"
-								onclick={() => expandedSkill = expandedSkill === skill.id ? null : skill.id}
-							>
-								<ChevronDown size={14} strokeWidth={2} style="transform: rotate({expandedSkill === skill.id ? 180 : 0}deg); transition: transform 0.2s ease" />
-							</button>
-						</div>
-					</div>
-
-					{#if assignedCount > 0}
-						<div class="assigned-pill">{assignedCount} agent{assignedCount !== 1 ? 's' : ''} assigned</div>
-					{/if}
-
-					{#if expandedSkill === skill.id}
-						<div class="skill-assignments fade-in-up">
-							<div class="assignment-title label">Assign to Agents</div>
-							<div class="assignment-grid">
-								{#each $agents as agent (agent.id)}
-									{@const isAssigned = assigned(agent.id, skill.id)}
-									<label class="assignment-item {isAssigned ? 'assigned' : ''}">
-										<input
-											type="checkbox"
-											checked={isAssigned}
-											onchange={(e) => toggleAssignment(agent.id, skill.id, e.currentTarget.checked)}
-											class="assignment-check"
-										/>
-										<span class="assignment-role">{agent.role}</span>
-										<span class="assignment-name">{agent.name}</span>
-									</label>
-								{/each}
-							</div>
-						</div>
-					{/if}
-				</div>
-			{/each}
-		</div>
-	{/if}
+<div class="registry-toolbar">
+	<div><strong>{$skills.length} registered skills</strong><span>{$skills.filter((skill) => skill.is_active).length} active · {$agentSkills.length} agent assignments</span></div>
+	<div class="button-row"><button class="btn btn-secondary" onclick={() => uploadInput?.click()}><Upload size={14} /> Upload file</button><button class="btn btn-primary" onclick={openCreate}><Plus size={14} /> Create skill</button></div>
 </div>
 
-<style>
-	.skills-studio {
-		display: flex;
-		flex-direction: column;
-		gap: 1.25rem;
-	}
-	.studio-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-	.studio-info { display: flex; align-items: center; gap: 0.625rem; }
-	.studio-count { font-size: 0.8125rem; color: var(--color-text-muted); }
-	.studio-active {
-		font-size: 0.75rem;
-		color: var(--color-status-success-default);
-		background: color-mix(in srgb, var(--color-status-success-default) 10%, transparent);
-		border: 1px solid color-mix(in srgb, var(--color-status-success-default) 20%, transparent);
-		padding: 0.15rem 0.5rem;
-		border-radius: 100px;
-	}
+{#if loadError}
+	<div class="registry-error"><strong>Skill Registry unavailable</strong><p>{loadError}</p><small>Apply migration 20260705120000_skill_and_prompt_registry_v2.sql, then reload the PostgREST schema.</small></div>
+{:else if !$skills.length}
+	<div class="empty-state"><ShieldCheck size={32} /><strong>No skills registered</strong><p>Create a policy manually or import a Markdown, text, or JSON skill definition.</p></div>
+{:else}
+	<div class="registry-list">
+		{#each $skills as skill (skill.id)}
+			{@const links = assignedAgents(skill.id)}
+			<article class="registry-item">
+				<button class="registry-summary" onclick={() => expandedId = expandedId === skill.id ? null : skill.id}>
+					<span class="registry-icon"><Wrench size={15} /></span>
+					<span class="registry-main"><strong>{skill.name}</strong><small>{skill.description || skill.purpose || 'No description provided'}</small></span>
+					<span class="registry-meta"><span class="tag">{skill.category || 'general'}</span><span>v{skill.version}</span><span><Users size={12} /> {links.length}</span><span class="status-badge status-{skill.status || (skill.is_active ? 'active' : 'disabled')}">{skill.status || (skill.is_active ? 'active' : 'disabled')}</span></span>
+					<ChevronDown size={15} class="registry-chevron {expandedId === skill.id ? 'open' : ''}" />
+				</button>
+				{#if expandedId === skill.id}
+					<div class="registry-detail">
+						<div class="policy-grid"><section><span class="eyebrow">Purpose</span><p>{skill.purpose || skill.description || 'Not specified'}</p></section><section><span class="eyebrow">When to use</span><p>{skill.when_to_use || 'Controlled by the Orchestrator and agent assignment.'}</p></section><section><span class="eyebrow">When not to use</span><p>{skill.when_not_to_use || 'Not specified'}</p></section></div>
+						<section class="policy-block"><span class="eyebrow">Execution policy</span><pre>{skill.instructions}</pre></section>
+						<div class="policy-grid"><section><span class="eyebrow">Allowed tools</span><div class="tag-list">{#each skill.allowed_tools || [] as tool}<span class="tag">{tool}</span>{/each}</div></section><section><span class="eyebrow">Success criteria</span><ul>{#each skill.success_criteria || [] as criterion}<li>{criterion}</li>{/each}</ul></section><section><span class="eyebrow">Examples</span><ul>{#each skill.examples || [] as example}<li>{example}</li>{/each}</ul></section></div>
+						<section class="assignment-section"><div><span class="eyebrow">Agent assignments</span><p>Only assigned active skills are injected into that agent’s execution prompt.</p></div><div class="assignment-list">{#each $agents as agent}<label class:assigned={isAssigned(agent.id, skill.id)}><input type="checkbox" checked={isAssigned(agent.id, skill.id)} onchange={(event) => assign(agent.id, skill.id, event.currentTarget.checked)} /><span><strong>{agent.name}</strong><small>{agent.role}</small></span></label>{/each}</div></section>
+						<div class="registry-actions"><button class="btn btn-primary" onclick={() => openEdit(skill)}><Pencil size={13} /> Edit policy</button><button class="btn btn-secondary" onclick={() => copySkill(skill)}><Copy size={13} /> Duplicate</button><button class="btn btn-danger" onclick={() => remove(skill)}><Trash2 size={13} /> Delete</button></div>
+					</div>
+				{/if}
+			</article>
+		{/each}
+	</div>
+{/if}
 
-	/* Create form */
-	.create-card {
-		background: var(--color-surface-elevated);
-		border: 1px solid var(--color-border-strong);
-		border-radius: 12px;
-		overflow: hidden;
-	}
-	.create-header {
-		padding: 0.75rem 1rem;
-		border-bottom: 1px solid var(--color-border-default);
-		background: color-mix(in srgb, var(--p-color-neutral-0) 1.5%, transparent);
-	}
-	.mode-tabs { display: flex; gap: 0.375rem; }
-	.mode-tab {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
-		padding: 0.35rem 0.75rem;
-		border-radius: 7px;
-		font-size: 0.75rem;
-		font-weight: 500;
-		background: transparent;
-		border: 1px solid transparent;
-		color: var(--color-text-muted);
-		cursor: pointer;
-		transition: all 0.15s ease;
-	}
-	.mode-tab.active {
-		background: var(--color-surface-subtle);
-		border-color: var(--color-border-strong);
-		color: var(--color-text-primary);
-	}
-	.create-fields {
-		padding: 1rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-	}
-	.create-card .btn {
-		margin: 0 1rem 1rem;
-	}
-	.field-group { display: flex; flex-direction: column; gap: 0.3rem; }
-	.field-hint { font-size: 0.7rem; color: var(--color-text-muted); line-height: 1.4; }
-
-	/* Error */
-	.error-card {
-		background: color-mix(in srgb, var(--color-status-danger-background) 60%, var(--p-color-neutral-950));
-		border: 1px solid color-mix(in srgb, var(--color-status-danger-default) 30%, transparent);
-		border-radius: 10px;
-		padding: 1rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-	}
-	.error-title { display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; font-weight: 600; color: var(--color-status-danger-default); }
-	.error-msg { font-size: 0.8rem; color: var(--p-color-danger-200); font-family: var(--font-mono); }
-	.error-hint { font-size: 0.75rem; color: var(--color-text-secondary); line-height: 1.5; margin-top: 0.25rem; }
-
-	/* Skills grid */
-	.skills-grid {
-		display: flex;
-		flex-direction: column;
-		gap: 0.625rem;
-	}
-
-	.skill-card {
-		background: var(--color-surface-elevated);
-		border: 1px solid var(--color-border-default);
-		border-radius: 12px;
-		padding: 0.875rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.625rem;
-		transition: all 0.2s ease;
-	}
-	.skill-card:hover { border-color: var(--color-border-strong); }
-	.skill-card.active { border-left: 3px solid var(--color-action-primary); }
-	.skill-card.inactive { opacity: 0.55; }
-	.skill-card.expanded { border-color: var(--color-border-inverse); }
-
-	.skill-top {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.75rem;
-	}
-	.skill-icon { 
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0; 
-		margin-top: 0.1rem; 
-	}
-	.skill-info { flex: 1; min-width: 0; }
-	.skill-name {
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: var(--color-text-primary);
-	}
-	.skill-version {
-		font-size: 0.65rem;
-		font-family: var(--font-mono);
-		color: var(--color-text-muted);
-		margin-left: 0.25rem;
-	}
-	.skill-desc {
-		font-size: 0.775rem;
-		color: var(--color-text-secondary);
-		margin-top: 0.2rem;
-		line-height: 1.4;
-	}
-	.skill-controls {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
-		flex-shrink: 0;
-	}
-	.expand-btn {
-		width: 26px;
-		height: 26px;
-		border-radius: 6px;
-		border: 1px solid var(--color-border-default);
-		background: transparent;
-		color: var(--color-text-muted);
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all 0.15s ease;
-	}
-	.expand-btn:hover { background: var(--color-surface-subtle); color: var(--color-text-primary); }
-
-	.assigned-pill {
-		font-size: 0.675rem;
-		color: var(--color-action-primary-hover);
-		background: color-mix(in srgb, var(--color-action-primary) 10%, transparent);
-		border: 1px solid color-mix(in srgb, var(--color-action-primary) 20%, transparent);
-		border-radius: 100px;
-		padding: 0.15rem 0.5rem;
-		align-self: flex-start;
-	}
-
-	/* Assignments */
-	.skill-assignments {
-		background: var(--color-surface-subtle);
-		border: 1px solid var(--color-border-default);
-		border-radius: 8px;
-		padding: 0.75rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-	.assignment-title { margin-bottom: 0.125rem; }
-	.assignment-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		gap: 0.375rem;
-	}
-	.assignment-item {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
-		padding: 0.35rem 0.5rem;
-		border-radius: 7px;
-		background: transparent;
-		border: 1px solid var(--color-border-default);
-		cursor: pointer;
-		transition: all 0.15s ease;
-	}
-	.assignment-item:hover { background: color-mix(in srgb, var(--color-surface-elevated) 3%, transparent); }
-	.assignment-item.assigned {
-		background: color-mix(in srgb, var(--color-action-primary) 7%, transparent);
-		border-color: color-mix(in srgb, var(--color-action-primary) 25%, transparent);
-	}
-	.assignment-check { cursor: pointer; accent-color: var(--color-action-primary); }
-	.assignment-role {
-		font-size: 0.65rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--color-action-primary-hover);
-	}
-	.assignment-name {
-		font-size: 0.72rem;
-		color: var(--color-text-secondary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-</style>
+{#if editorOpen}
+	<div class="modal-overlay" role="dialog" aria-modal="true" aria-label={editingId ? 'Edit skill' : 'Create skill'}>
+		<div class="modal registry-modal">
+			<header class="modal-header"><div><span class="eyebrow">{editingId ? 'Versioned policy update' : 'New capability'}</span><h2>{editingId ? `Edit ${form.name}` : 'Create skill'}</h2></div><button class="icon-button" onclick={() => editorOpen = false} aria-label="Close editor"><X size={16} /></button></header>
+			<div class="registry-editor">
+				<section class="editor-section"><h3>Identity & routing</h3><div class="form-grid three"><label class="field"><span>Name</span><input class="input" bind:value={form.name} /></label><label class="field"><span>Category</span><input class="input" bind:value={form.category} /></label><label class="field"><span>Status</span><select class="input" bind:value={form.status}><option value="draft">Draft</option><option value="active">Active</option><option value="disabled">Disabled</option><option value="error">Error</option></select></label></div><label class="field"><span>Description</span><input class="input" bind:value={form.description} /></label><label class="field"><span>Purpose</span><textarea class="input" rows="2" bind:value={form.purpose}></textarea></label><div class="form-grid"><label class="field"><span>When to use</span><textarea class="input" rows="3" bind:value={form.when_to_use}></textarea></label><label class="field"><span>When not to use</span><textarea class="input" rows="3" bind:value={form.when_not_to_use}></textarea></label></div></section>
+				<section class="editor-section"><h3>Execution policy</h3><label class="field"><span>Instructions passed to the model</span><textarea class="input mono policy-editor" rows="10" bind:value={form.instructions}></textarea></label><div class="form-grid"><label class="field"><span>Allowed tools · one per line</span><textarea class="input mono" rows="5" bind:value={form.allowed_tools_text}></textarea></label><label class="field"><span>Success criteria · one per line</span><textarea class="input" rows="5" bind:value={form.success_criteria_text}></textarea></label></div><label class="field"><span>Examples · one per line</span><textarea class="input" rows="4" bind:value={form.examples_text}></textarea></label></section>
+				<section class="editor-section"><h3>Input & output contracts</h3><div class="form-grid"><label class="field"><span>Input schema JSON</span><textarea class="input mono" rows="9" bind:value={form.input_schema_text}></textarea></label><label class="field"><span>Output schema JSON</span><textarea class="input mono" rows="9" bind:value={form.output_schema_text}></textarea></label></div><label class="field"><span>Changelog</span><textarea class="input" rows="2" bind:value={form.changelog}></textarea></label>{#if editingId}<label class="field"><span>Change reason</span><input class="input" bind:value={form.change_reason} placeholder="Why this policy changed" /></label>{/if}</section>
+				{#if editingId && versions.length}<section class="editor-section"><h3><History size={15} /> Version history</h3><div class="version-list">{#each versions as version}<div><span>v{version.version}</span><small>{version.change_reason || 'No reason provided'} · {new Date(version.created_at).toLocaleString()}</small><button class="btn btn-ghost btn-sm" onclick={() => rollback(version.id)}><RotateCcw size={12} /> Restore</button></div>{/each}</div></section>{/if}
+			</div>
+			<footer class="modal-footer"><button class="btn btn-ghost" onclick={() => editorOpen = false}>Cancel</button><button class="btn btn-primary" disabled={saving} onclick={save}><Save size={14} /> {saving ? 'Saving…' : editingId ? 'Save new version' : 'Create skill'}</button></footer>
+		</div>
+	</div>
+{/if}

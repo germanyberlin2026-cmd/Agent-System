@@ -224,3 +224,63 @@
     --color-status-danger-text: var(--p-color-danger-200);
   }
 }
+
+/* Kceva workspace theme: a calm, high-contrast graphite palette. These
+   semantic aliases are the only color source consumed by the application. */
+:root {
+  --color-background-default: #f3f4f6;
+  --color-background-subtle: #eef0f3;
+  --color-background-muted: #e5e7eb;
+  --color-surface-default: #ffffff;
+  --color-surface-subtle: #f8f9fb;
+  --color-surface-elevated: #ffffff;
+  --color-surface-sunken: #eef0f3;
+  --color-surface-overlay: #ffffff;
+  --color-text-primary: #171a21;
+  --color-text-secondary: #4c5565;
+  --color-text-muted: #697386;
+  --color-text-disabled: #98a0ae;
+  --color-text-inverse: #ffffff;
+  --color-text-brand: #315efb;
+  --color-border-default: #d9dde5;
+  --color-border-subtle: #e7e9ee;
+  --color-border-strong: #b9c0cc;
+  --color-border-inverse: #7d8796;
+  --color-border-fokus: #315efb;
+  --color-action-primary: #315efb;
+  --color-action-primary-hover: #244bd6;
+  --color-action-primary-active: #1d3dab;
+  --color-action-primary-text: #ffffff;
+  --color-action-primary-icon: #ffffff;
+  --color-action-secondary: #ffffff;
+  --color-action-secondary-hover: #f3f5f8;
+  --color-action-secondary-active: #e8ebf0;
+  --color-action-secondary-text: #273142;
+  --color-action-secondary-icon: #4c5565;
+  --color-action-secondary-border: #d2d7e0;
+  --color-action-secondary-border-hover: #aeb6c3;
+  --color-action-secondary-border-active: #8c96a5;
+  --color-action-disabled-bg: #e8ebef;
+  --color-action-disabled-text: #929aa7;
+  --color-status-success-default: #21885b;
+  --color-status-success-background: #eaf7f0;
+  --color-status-success-subtle: #d9f0e4;
+  --color-status-success-border: #a9dac0;
+  --color-status-success-text: #17603f;
+  --color-status-warning-default: #a86412;
+  --color-status-warning-background: #fff5df;
+  --color-status-warning-subtle: #ffebbd;
+  --color-status-warning-border: #efd08c;
+  --color-status-warning-text: #744509;
+  --color-status-danger-default: #c13f4d;
+  --color-status-danger-background: #fff0f1;
+  --color-status-danger-subtle: #fbdde0;
+  --color-status-danger-border: #efb5bb;
+  --color-status-danger-text: #8d2d38;
+  --workspace-sidebar-width: 224px;
+  --workspace-max-width: 1680px;
+  --workspace-panel-padding: 20px;
+  --workspace-column-gap: 14px;
+  --workspace-control-height: 38px;
+  --workspace-transition: 160ms ease;
+}

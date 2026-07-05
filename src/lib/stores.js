@@ -20,7 +20,10 @@ let toastId = 0;
 
 export function addToast(message, type = 'info') {
 	const id = ++toastId;
-	toasts.update((t) => [...t, { id, message, type }]);
+	toasts.update((t) => {
+		if (t.some((item) => item.message === message && item.type === type)) return t;
+		return [...t, { id, message, type }];
+	});
 	setTimeout(() => {
 		toasts.update((t) => t.filter((x) => x.id !== id));
 	}, 4000);

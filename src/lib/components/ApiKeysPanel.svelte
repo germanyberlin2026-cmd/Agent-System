@@ -215,6 +215,8 @@ import { Lightbulb, Star, Zap, Rocket } from '@lucide/svelte';
 			{#each $agents as agent (agent.id)}
 				{@const assignment = getAssignment(agent.id)}
 				{@const assignedKey = assignment ? getApiKey(assignment.api_key_id) : null}
+				{@const modelInfo = assignedKey && assignment?.model_id ? getModelInfo(assignedKey.provider, assignment.model_id) : null}
+				<div class="model-assignment-row">
 				<div class="flex items-center gap-3 p-3 rounded-lg" style="background-color: var(--color-surface-subtle)">
 					<div class="flex items-center gap-2 min-w-0 flex-1">
 						<span class="badge badge-dim">{agent.role}</span>
@@ -290,30 +292,19 @@ import { Lightbulb, Star, Zap, Rocket } from '@lucide/svelte';
 						{/if}
 					</div>
 				</div>
+				{#if modelInfo}
+					<div class="model-capability-strip">
+						<div><span>Quality</span><strong>{modelInfo.intelligence || modelInfo.quality || 'Standard'}</strong></div>
+						<div><span>Speed</span><strong>{modelInfo.speed || 'Standard'}</strong></div>
+						<div><span>Cost</span><strong>{modelInfo.cost || 'Unknown'}</strong></div>
+						<div><span>Context</span><strong>{modelInfo.contextWindow || modelInfo.input_token_limit || 'Unknown'}</strong></div>
+						<div class="model-best-for"><span>Best for {agent.role}</span><strong>{modelInfo.bestFor?.join(' · ') || modelInfo.useCase || modelInfo.description || 'General tasks'}</strong></div>
+					</div>
+				{:else}
+					<div class="model-capability-empty">Assign a model to see quality, speed, cost and capability guidance.</div>
+				{/if}
+				</div>
 			{/each}
 		</div>
 	{/if}
-
-	<!-- Model Guide -->
-	<div class="divider mt-6 mb-4"></div>
-	<div class="text-xs text-secondary mb-3">
-		<strong class="text-primary"><Lightbulb size={13} strokeWidth={2} style="display:inline;vertical-align:-2px" /> Model Selection Guide:</strong>
-	</div>
-	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-		<div class="p-3 rounded-lg" style="background-color: var(--color-surface-subtle)">
-			<div class="text-xs font-semibold text-primary mb-1"><Star size={12} strokeWidth={2} style="display:inline;vertical-align:-1px" /> Most Intelligent</div>
-			<div class="text-xs text-secondary">Best for: Complex architecture, security reviews, advanced debugging, decision-making</div>
-			<div class="text-xs text-muted mt-1">Examples: Gemini 2.5 Pro, GPT-4O, Claude 3.5 Sonnet</div>
-		</div>
-		<div class="p-3 rounded-lg" style="background-color: var(--color-surface-subtle)">
-			<div class="text-xs font-semibold text-primary mb-1"><Zap size={12} strokeWidth={2} style="display:inline;vertical-align:-1px" /> Fast & Balanced</div>
-			<div class="text-xs text-secondary">Best for: Code generation, testing, documentation, most general tasks</div>
-			<div class="text-xs text-muted mt-1">Examples: Gemini 2.5 Flash, GPT-4O Mini, Claude Haiku</div>
-		</div>
-		<div class="p-3 rounded-lg" style="background-color: var(--color-surface-subtle)">
-			<div class="text-xs font-semibold text-primary mb-1"><Rocket size={12} strokeWidth={2} style="display:inline;vertical-align:-1px" /> Lightweight</div>
-			<div class="text-xs text-secondary">Best for: Simple tasks, real-time processing, cost optimization, lightweight analysis</div>
-			<div class="text-xs text-muted mt-1">Examples: Gemini Flash Lite, Gemma 4, Open-source models</div>
-		</div>
-	</div>
 </div>

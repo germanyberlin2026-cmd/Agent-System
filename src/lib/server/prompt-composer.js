@@ -1,0 +1,5 @@
+export function composeExecutionSystemPrompt(agent, selectedSkills = []) {
+	if (!agent?.system_prompt?.trim()) throw new Error('Agent system prompt is required');
+	const skillPolicies = selectedSkills.map((skill, index) => `SKILL ${index + 1}: ${skill.name}\nInstructions:\n${skill.instructions}\nAllowed tools: ${JSON.stringify(skill.allowed_tools || [])}\nSuccess criteria: ${JSON.stringify(skill.success_criteria || [])}\nInput contract: ${JSON.stringify(skill.input_schema || {})}\nOutput contract: ${JSON.stringify(skill.output_schema || {})}`).join('\n\n');
+	return `${agent.system_prompt}\n\nAGENT INPUT CONTRACT:\n${JSON.stringify(agent.input_schema || {})}\n\nAGENT OUTPUT CONTRACT (your JSON must conform):\n${JSON.stringify(agent.output_schema || {})}\n\nACTIVE SKILL POLICIES (${selectedSkills.length}):\n${skillPolicies || 'No skills selected for this task.'}\n\nInstruction precedence: platform safety and verified tool evidence > agent system prompt > active skill policies > task request. A skill is active only when listed above. Never claim use of an unlisted skill.`;
+}

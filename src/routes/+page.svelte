@@ -13,11 +13,7 @@
 
 	import Toasts from '../lib/components/Toasts.svelte';
 	import Sidebar from '../lib/components/Sidebar.svelte';
-	import ProjectInput from '../lib/components/ProjectInput.svelte';
-	import ScannerSection from '../lib/components/ScannerSection.svelte';
-	import OrchestratorSection from '../lib/components/OrchestratorSection.svelte';
-	import AgentTree from '../lib/components/AgentTree.svelte';
-	import TasksSection from '../lib/components/TasksSection.svelte';
+	import WorkflowWorkspace from '../lib/components/WorkflowWorkspace.svelte';
 	import ApiKeysPanel from '../lib/components/ApiKeysPanel.svelte';
 	import AgentManagement from '../lib/components/AgentManagement.svelte';
 	import SkillsPanel from '../lib/components/SkillsPanel.svelte';
@@ -26,17 +22,6 @@
 	let initialized = $state(false);
 	let skillRegistryError = $state('');
 
-	async function handleSelectTask(taskId) {
-		selectedTaskId.set(taskId);
-	}
-
-	const pipelineSteps = $derived([
-		{ icon: '01', label: 'Project', active: !!$activeProject, done: !!$activeProject },
-		{ icon: '02', label: 'Scanner', active: $activeProject?.scan_status === 'scanning', done: $activeProject?.scan_status === 'done' },
-		{ icon: '03', label: 'Orchestrate', active: $activeRun?.status === 'decomposing', done: $activeRun?.status && $activeRun.status !== 'decomposing' && $activeRun.status !== 'pending' },
-		{ icon: '04', label: 'Execute', active: $activeRun?.status === 'running', done: $activeRun?.status === 'validating' || $activeRun?.status === 'completed' },
-		{ icon: '05', label: 'Validate', active: $activeRun?.status === 'validating', done: $activeRun?.status === 'completed' },
-	]);
 
 	onMount(async () => {
 		try {
@@ -114,54 +99,16 @@
 				</div>
 			</div>
 		{:else if activeTab === 'workflow'}
-			<div class="workflow-layout fade-in">
-				<!-- Left panel -->
-				<div class="left-panel">
-					<!-- Pipeline visualization bar -->
-					<div class="pipeline-bar">
-						<div class="pipeline-steps">
-							{#each pipelineSteps as step, i}
-								<div class="pipe-step {step.active ? 'active' : ''} {step.done ? 'done' : ''}">
-									<div class="pipe-icon">{step.icon}</div>
-									<div class="pipe-label">{step.label}</div>
-								</div>
-								{#if i < pipelineSteps.length - 1}
-									<div class="pipe-arrow {step.done ? 'done' : ''} {step.active ? 'active' : ''}">
-										<svg viewBox="0 0 20 4" fill="none" width="20" height="4">
-											<path d="M0 2h16M14 0l2 2-2 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-										</svg>
-									</div>
-								{/if}
-							{/each}
-						</div>
-					</div>
-
-					<ProjectInput />
-					<ScannerSection />
-					<OrchestratorSection />
-				</div>
-
-				<!-- Right panel -->
-				<div class="right-panel">
-					<AgentTree
-						agents={$agents}
-						tasks={$tasks}
-						activeRun={$activeRun}
-						activeProject={$activeProject}
-						selectedTaskId={$selectedTaskId}
-						onSelectTask={handleSelectTask}
-					/>
-					<TasksSection />
-				</div>
+			<div class="page-shell wide fade-in">
+				<div class="page-heading"><div><span class="eyebrow">Developer workspace</span><h1>Workflow</h1><p>Connect project context, issue a command, and inspect every execution step.</p></div></div>
+				<WorkflowWorkspace />
 			</div>
 
 		{:else if activeTab === 'agents'}
 			<div class="panel-page fade-in">
 				<div class="panel-header">
-					<h1 class="panel-title">
-						Agent Studio
-					</h1>
-					<p class="panel-subtitle">Configure, manage and monitor your AI agents</p>
+					<span class="eyebrow">Configuration</span><h1 class="panel-title">Agents</h1>
+					<p class="panel-subtitle">Manage roles, prompts, contracts and execution responsibility.</p>
 				</div>
 				<AgentManagement />
 			</div>
@@ -169,10 +116,8 @@
 		{:else if activeTab === 'keys'}
 			<div class="panel-page fade-in">
 				<div class="panel-header">
-					<h1 class="panel-title">
-						Model Hub
-					</h1>
-					<p class="panel-subtitle">Connect AI providers and assign models to your agents</p>
+					<span class="eyebrow">Infrastructure</span><h1 class="panel-title">API Keys & Models</h1>
+					<p class="panel-subtitle">Connect providers and assign the right model to each agent.</p>
 				</div>
 				<ApiKeysPanel />
 			</div>
@@ -180,10 +125,8 @@
 		{:else if activeTab === 'skills'}
 			<div class="panel-page fade-in">
 				<div class="panel-header">
-					<h1 class="panel-title">
-						Skill Registry
-					</h1>
-					<p class="panel-subtitle">Database-driven capabilities and agent tool policies</p>
+					<span class="eyebrow">Capabilities</span><h1 class="panel-title">Skill Registry</h1>
+					<p class="panel-subtitle">Create reusable policies, tool access and execution contracts.</p>
 				</div>
 				<SkillsPanel loadError={skillRegistryError} />
 			</div>
@@ -252,80 +195,6 @@
 	.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
 	.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
 
-	/* Workflow layout */
-	.workflow-layout {
-		display: grid;
-		grid-template-columns: 380px 1fr;
-		gap: 0;
-		height: 100%;
-		min-height: 100vh;
-	}
-
-	.left-panel {
-		border-right: 1px solid var(--color-border-default);
-		display: flex;
-		flex-direction: column;
-		gap: 0;
-		overflow-y: auto;
-		height: 100vh;
-		position: sticky;
-		top: 0;
-	}
-
-	.right-panel {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		padding: 1.25rem;
-		overflow-y: auto;
-		min-height: 100vh;
-	}
-
-	/* Pipeline bar */
-	.pipeline-bar {
-		padding: 0.875rem 1.125rem;
-		border-bottom: 1px solid var(--color-border-default);
-		background: var(--color-surface-subtle);
-	}
-	.pipeline-steps {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-	}
-	.pipe-step {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.2rem;
-		opacity: 0.35;
-		transition: opacity 0.3s ease;
-	}
-	.pipe-step.done { opacity: 0.7; }
-	.pipe-step.active { opacity: 1; }
-	.pipe-icon {
-		font-size: 0.875rem;
-		line-height: 1;
-	}
-	.pipe-label {
-		font-size: 0.575rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		color: var(--color-text-muted);
-		white-space: nowrap;
-	}
-	.pipe-step.active .pipe-label { color: var(--color-action-primary-hover); }
-	.pipe-step.done .pipe-label { color: var(--color-status-success-default); }
-	.pipe-arrow {
-		color: var(--color-border-strong);
-		flex-shrink: 0;
-		transition: color 0.3s ease;
-		margin-top: -0.75rem;
-		flex: 1;
-	}
-	.pipe-arrow.done { color: color-mix(in srgb, var(--color-status-success-default) 20%, transparent); }
-	.pipe-arrow.active { color: color-mix(in srgb, var(--color-action-primary) 20%, transparent); }
-
 	/* Panel pages */
 	.panel-page {
 		max-width: 900px;
@@ -349,18 +218,5 @@
 		font-size: 0.875rem;
 		color: var(--color-text-muted);
 		margin: 0;
-	}
-
-	@media (max-width: 1024px) {
-		.workflow-layout {
-			grid-template-columns: 1fr;
-			height: auto;
-		}
-		.left-panel {
-			position: static;
-			height: auto;
-			border-right: none;
-			border-bottom: 1px solid var(--color-border-default);
-		}
 	}
 </style>

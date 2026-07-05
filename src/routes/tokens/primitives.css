@@ -6,7 +6,7 @@
 
    Spacing primitives are intentionally not redeclared: Figma's spacing
    scale (spacing.1=4px ... spacing.24=96px) is identical to Tailwind v4's
-   built-in --spacing multiplier scale, so p-*/gap-*/m-* utilities and
+   built-in --spacing multiplier scale, so spacing utility classes and
    calc(var(--spacing) * N) already are the primitive spacing scale.
 ══════════════════════════════════════════ */
 

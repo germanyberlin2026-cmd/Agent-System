@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../env.js';
+import { composeExecutionSystemPrompt } from './prompt-composer.js';
 
 const endpoints = {
 	openai: 'https://api.openai.com/v1/chat/completions',
@@ -76,9 +77,10 @@ export async function executeBackend(name, body) {
 		const repair = body.task.input_payload?.repair_context;
 		const repairDirective = repair ? `\n\nCRITICAL REPAIR ATTEMPT:\nThe previous file edit was rejected by the deterministic tool. Treat tool_feedback.actual_content as the only source of truth for that file. Return a corrected edit for the failed path only. The new search string must be copied verbatim from actual_content, must occur exactly once, and must not repeat the rejected search.\nRepair context: ${JSON.stringify(repair)}` : '';
 		const user = `Task: ${body.task.title}\nDescription: ${body.task.description}\nInput: ${JSON.stringify(body.task.input_payload || {})}${repairDirective}\nProject knowledge: ${JSON.stringify(body.knowledge || {})}\nReturn ONLY valid JSON matching the configured output schema. Never invent files or completed actions.`;
-		const text = await callProvider(body.provider, body.api_key, body.model, `${body.agent.system_prompt}${repairDirective}`, user, 2400);
+		const composedSystem = composeExecutionSystemPrompt(body.agent, body.knowledge?.selected_skills || []);
+		const text = await callProvider(body.provider, body.api_key, body.model, `${composedSystem}${repairDirective}`, user, 2400);
 		let output; try { output = JSON.parse(cleanJson(text)); } catch { output = { raw_response: text }; }
-		return { output, tokens_used: Math.ceil((body.agent.system_prompt.length + user.length + text.length) / 4), cost: 0 };
+		return { output, tokens_used: Math.ceil((composedSystem.length + user.length + text.length) / 4), cost: 0, execution_context: { agent_prompt: true, skills: (body.knowledge?.selected_skills || []).map((skill) => ({ name: skill.name, version: skill.version })) } };
 	}
 	if (name === 'kceva-validator') {
 		if (!Array.isArray(body.tasks)) throw new Error('Tasks array is required');

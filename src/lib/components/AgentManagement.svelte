@@ -1,13 +1,13 @@
 <script>
-	import { Pencil, Trash2, Plus, X, Loader2, Check, Search, Network, PenTool, Code2, TestTube, Microscope, FileText, Bug } from '@lucide/svelte';
-	import { agents, addToast } from '../stores.js';
+	import { Pencil, Trash2, Plus, X, Loader2, Check, Search, Network, PenTool, Code2, TestTube, Microscope, FileText, Bug, Copy, Power } from '@lucide/svelte';
+	import { agents, assignments, apiKeys, agentSkills, skills, addToast } from '../stores.js';
 	import { createAgent, updateAgent, deleteAgent, fetchAgents, fetchPromptVersions, rollbackPromptVersion } from '../api.js';
 	import { AGENT_ROLES } from '../constants.js';
 
 	let showForm = $state(false);
 	let editingAgent = $state(null);
 	let promptVersions = $state([]);
-	let formData = $state({ name: '', role: 'coder', description: '', scope: '', system_prompt: '' });
+	let formData = $state({ name: '', role: 'coder', description: '', scope: '', system_prompt: '', input_schema_text: '{}', output_schema_text: '{}', change_reason: '' });
 	let saving = $state(false);
 	let confirmDelete = $state(null);
 
@@ -24,7 +24,7 @@
 
 	function openCreate() {
 		editingAgent = null;
-		formData = { name: '', role: 'coder', description: '', scope: '', system_prompt: '' };
+		formData = { name: '', role: 'coder', description: '', scope: '', system_prompt: '', input_schema_text: '{}', output_schema_text: '{}', change_reason: '' };
 		promptVersions = [];
 		showForm = true;
 	}
@@ -36,7 +36,10 @@
 			role: agent.role,
 			description: agent.description || '',
 			scope: agent.scope || '',
-			system_prompt: agent.system_prompt || ''
+			system_prompt: agent.system_prompt || '',
+			input_schema_text: JSON.stringify(agent.input_schema || {}, null, 2),
+			output_schema_text: JSON.stringify(agent.output_schema || {}, null, 2),
+			change_reason: ''
 		};
 		showForm = true;
 		promptVersions = await fetchPromptVersions(agent.id);
@@ -56,11 +59,15 @@
 		if (!formData.name.trim()) { addToast('Agent name is required', 'error'); return; }
 		saving = true;
 		try {
+			let input_schema, output_schema;
+			try { input_schema = JSON.parse(formData.input_schema_text || '{}'); output_schema = JSON.parse(formData.output_schema_text || '{}'); }
+			catch { throw new Error('Input and output contracts must be valid JSON'); }
+			const payload = { name: formData.name, role: formData.role, description: formData.description, scope: formData.scope, system_prompt: formData.system_prompt, input_schema, output_schema, change_reason: formData.change_reason };
 			if (editingAgent) {
-				await updateAgent(editingAgent.id, formData);
+				await updateAgent(editingAgent.id, payload);
 				addToast('Agent updated', 'success');
 			} else {
-				await createAgent(formData);
+				await createAgent(payload);
 				addToast('Agent created', 'success');
 			}
 			const all = await fetchAgents();
@@ -85,8 +92,35 @@
 		}
 	}
 
+	async function duplicateAgent(agent) {
+		try {
+			await createAgent({ ...agent, name: `${agent.name} Copy` });
+			agents.set(await fetchAgents());
+			addToast('Agent duplicated', 'success');
+		} catch (error) { addToast(`Could not duplicate agent: ${error.message}`, 'error'); }
+	}
+
+	async function toggleAgent(agent) {
+		try {
+			await updateAgent(agent.id, { is_active: !agent.is_active });
+			agents.set(await fetchAgents());
+			addToast(agent.is_active ? 'Agent disabled' : 'Agent enabled', 'success');
+		} catch (error) { addToast(`Could not update agent: ${error.message}`, 'error'); }
+	}
+
 	function getRoleCfg(role) {
 		return roleConfig[role] || { icon: Code2, color: 'var(--color-role-architect)', desc: '' };
+	}
+
+	function modelFor(agentId) {
+		const assignment = $assignments.find((item) => item.agent_id === agentId);
+		const key = $apiKeys.find((item) => item.id === assignment?.api_key_id);
+		return assignment ? `${key?.provider || 'provider'} / ${assignment.model_id}` : 'No model assigned';
+	}
+
+	function skillsFor(agentId) {
+		const ids = $agentSkills.filter((item) => item.agent_id === agentId).map((item) => item.skill_id);
+		return $skills.filter((skill) => ids.includes(skill.id));
 	}
 </script>
 
@@ -151,6 +185,12 @@
 						<div class="role-desc">{getRoleCfg(formData.role).desc}</div>
 					{/if}
 				</div>
+
+				<div class="form-row-2">
+					<div class="field-group"><label class="label" for="agent-input-contract">Input Contract (JSON)</label><textarea id="agent-input-contract" class="input prompt-textarea" rows="6" bind:value={formData.input_schema_text}></textarea></div>
+					<div class="field-group"><label class="label" for="agent-output-contract">Output Contract (JSON)</label><textarea id="agent-output-contract" class="input prompt-textarea" rows="6" bind:value={formData.output_schema_text}></textarea></div>
+				</div>
+				{#if editingAgent}<div class="field-group"><label class="label" for="agent-change-reason">Change Reason</label><input id="agent-change-reason" class="input" bind:value={formData.change_reason} placeholder="Why this prompt or contract changed" /></div>{/if}
 
 				<div class="form-row-2">
 					<div class="field-group">
@@ -263,8 +303,8 @@
 		<div class="agents-grid">
 			{#each $agents as agent (agent.id)}
 				{@const cfg = getRoleCfg(agent.role)}
-				<div class="agent-card" style="--agent-color: {cfg.color}">
-					<div class="card-top">
+				<details class="agent-card" style="--agent-color: {cfg.color}">
+					<summary class="card-top">
 						<div class="card-avatar">
 							<span class="card-avatar-icon">
 								{#if agent.role === 'scanner'}
@@ -293,14 +333,18 @@
 							<div class="card-role">{agent.role}</div>
 						</div>
 						<div class="card-actions">
-							<button class="icon-btn" onclick={() => openEdit(agent)} title="Edit">
+							<button class="icon-btn" onclick={(event) => { event.preventDefault(); openEdit(agent); }} title="Edit agent">
 								<Pencil size={13} strokeWidth={1.75} />
 							</button>
-							<button class="icon-btn danger" onclick={() => confirmDelete = agent} title="Delete">
+							<button class="icon-btn" onclick={(event) => { event.preventDefault(); duplicateAgent(agent); }} title="Duplicate agent"><Copy size={13} /></button>
+							<button class="icon-btn" onclick={(event) => { event.preventDefault(); toggleAgent(agent); }} title={agent.is_active ? 'Disable agent' : 'Enable agent'}><Power size={13} /></button>
+							<button class="icon-btn danger" onclick={(event) => { event.preventDefault(); confirmDelete = agent; }} title="Delete agent">
 								<Trash2 size={13} strokeWidth={1.75} />
 							</button>
 						</div>
-					</div>
+					</summary>
+					<div class="agent-card-details">
+					<div class="agent-runtime-summary"><div><span>Assigned model</span><strong>{modelFor(agent.id)}</strong></div><div><span>Active skills</span><strong>{skillsFor(agent.id).length}</strong></div><div><span>Prompt contract</span><strong>{agent.system_prompt ? 'Configured' : 'Missing'}</strong></div></div>
 
 					{#if agent.description}
 						<div class="card-desc">{agent.description}</div>
@@ -313,12 +357,15 @@
 					{/if}
 
 					<div class="card-footer">
+						<span class="badge {agent.is_active ? 'badge-green' : 'badge-dim'}">{agent.is_active ? 'Active' : 'Disabled'}</span>
 						<span class="badge badge-dim">{agent.role}</span>
 						{#if agent.scope}
 							<span class="scope-tag">{agent.scope}</span>
 						{/if}
 					</div>
-				</div>
+					{#if skillsFor(agent.id).length}<div class="tag-list">{#each skillsFor(agent.id) as skill}<span class="tag">{skill.name} · v{skill.version}</span>{/each}</div>{/if}
+					</div>
+				</details>
 			{/each}
 		</div>
 	{/if}
@@ -360,6 +407,9 @@
 		position: relative;
 		overflow: hidden;
 	}
+	.agent-card summary { list-style: none; cursor: pointer; }
+	.agent-card summary::-webkit-details-marker { display: none; }
+	.agent-card-details { display: flex; flex-direction: column; gap: 0.75rem; padding-top: 0.875rem; margin-top: 0.875rem; border-top: 1px solid var(--color-border-default); }
 	.agent-card::before {
 		content: '';
 		position: absolute;

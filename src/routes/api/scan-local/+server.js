@@ -43,6 +43,24 @@ export async function POST({ request, url }) {
 	}
 
 	const names = new Set(files.map((file) => file.toLowerCase()));
+	const languageByExtension = { '.js': 'JavaScript', '.ts': 'TypeScript', '.svelte': 'Svelte', '.py': 'Python', '.go': 'Go', '.rs': 'Rust', '.java': 'Java', '.sql': 'SQL', '.css': 'CSS', '.html': 'HTML' };
+	const languageCounts = {};
+	for (const file of files) {
+		const language = languageByExtension[path.extname(file).toLowerCase()];
+		if (language) languageCounts[language] = (languageCounts[language] || 0) + 1;
+	}
+	const packageJson = names.has('package.json') ? JSON.parse(await readFile(path.join(project_path, 'package.json'), 'utf8').catch(() => '{}')) : {};
+	const packages = { ...(packageJson.dependencies || {}), ...(packageJson.devDependencies || {}) };
+	const frameworks = [
+		['@sveltejs/kit', 'SvelteKit'], ['svelte', 'Svelte'], ['next', 'Next.js'], ['react', 'React'], ['vue', 'Vue'], ['@angular/core', 'Angular'], ['express', 'Express'], ['vite', 'Vite']
+	].filter(([dependency]) => packages[dependency]).map(([dependency, name]) => ({ name, version: packages[dependency] }));
+	const packageManager = names.has('pnpm-lock.yaml') ? 'pnpm' : names.has('yarn.lock') ? 'Yarn' : names.has('bun.lockb') || names.has('bun.lock') ? 'Bun' : names.has('package-lock.json') ? 'npm' : names.has('package.json') ? 'Unknown Node package manager' : null;
+	const databases = [['@supabase/supabase-js','Supabase'],['prisma','Prisma'],['@prisma/client','Prisma'],['mongoose','MongoDB/Mongoose'],['pg','PostgreSQL'],['mysql2','MySQL'],['better-sqlite3','SQLite']].filter(([dependency]) => packages[dependency]).map(([, name]) => name);
+	const configFiles = files.filter((file) => /(^|\/)(package\.json|tsconfig\.json|jsconfig\.json|vite\.config\.[jt]s|svelte\.config\.[jt]s|next\.config\.[jt]s|dockerfile|docker-compose\.ya?ml|\.env\.example|vercel\.json)$/i.test(file)).slice(0, 30);
+	const warnings = [];
+	if (files.length >= MAX_FILES) warnings.push(`File index reached the ${MAX_FILES}-file safety limit; results are truncated.`);
+	if (!configFiles.length) warnings.push('No recognized build or framework configuration files were found.');
+	if (!Object.keys(languageCounts).length) warnings.push('No recognized source-code languages were detected.');
 	const techStack = [];
 	if (names.has('package.json')) techStack.push('JavaScript/TypeScript', 'Node.js');
 	if ([...names].some((file) => file.endsWith('.svelte'))) techStack.push('SvelteKit');
@@ -56,6 +74,7 @@ export async function POST({ request, url }) {
 		entry_points: entryPoints,
 		dependency_graph: { root: files.filter((file) => !file.includes('/')).slice(0, 50) },
 		file_tree: { root: project_path, files, source_excerpts: sourceFiles, truncated: files.length >= MAX_FILES },
+		scan_details: { files_scanned: files.length, ignored_directories: [...IGNORED], languages: languageCounts, frameworks, package_manager: packageManager, database_clients: [...new Set(databases)], config_files: configFiles, warnings },
 		documentation: sourceFiles.filter((file) => /(^|\/)README\.md$/i.test(file.path)).map((file) => ({ path: file.path, summary: file.content.slice(0, 500) })),
 		raw_summary: `Scanned ${files.length} project files. Detected ${techStack.join(', ') || 'an unknown stack'}. ` +
 			`Loaded ${sourceFiles.length} compact source excerpts. Entry points: ${entryPoints.slice(0, 8).join(', ')}.`

@@ -15,6 +15,7 @@ Thumbs.db
 
 # Env
 .env
+.kceva-dev.log
 .env.*
 !.env.example
 !.env.test
