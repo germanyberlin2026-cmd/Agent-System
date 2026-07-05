@@ -1,6 +1,8 @@
 <script>
 	import { Search, Network, PenTool, Code2, TestTube, Microscope, FileText, Bug, Bot } from '@lucide/svelte';
+	import Icon from './UI/Icon.svelte';
 	import StatusBadge from './StatusBadge.svelte';
+	import { ROLE_ICONS } from '../constants.js';
 
 	let { agents = [], tasks = [], activeRun = null, activeProject = null, selectedTaskId = null, onSelectTask = null } = $props();
 
@@ -96,7 +98,11 @@
 					<div class="agent-top">
 						<div class="agent-avatar" style="background: color-mix(in srgb, {roleCfg.color} 12%, transparent); border-color: color-mix(in srgb, {roleCfg.color} 25%, transparent)">
 						<span class="avatar-icon" style="color: {roleCfg.color}">
-							<svelte:component this={roleCfg.icon} size={15} strokeWidth={1.75} />
+							{#if agent.icon && agent.icon !== ROLE_ICONS[agent.role]}
+								<Icon name={agent.icon} size={15} strokeWidth={1.75} />
+							{:else}
+								<svelte:component this={roleCfg.icon} size={15} strokeWidth={1.75} />
+							{/if}
 						</span>
 						{#if active}
 							<span class="avatar-pulse" style="background: {roleCfg.color}"></span>

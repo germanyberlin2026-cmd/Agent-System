@@ -471,20 +471,32 @@ export function getModelRecommendation(role, modelInfo) {
 }
 
 export const ROLE_ICONS = {
-	scanner:      { emoji: '🔍' },
-	orchestrator: { emoji: '🧠' },
-	architect:    { emoji: '🏗️' },
-	coder:        { emoji: '💻' },
-	tester:       { emoji: '🧪' },
-	reviewer:     { emoji: '🔬' },
-	documenter:   { emoji: '📄' },
-	debugger:     { emoji: '🐛' },
-	custom:       { emoji: '⚙️' }
+	scanner:      'search',
+	orchestrator: 'network',
+	architect:    'pen-tool',
+	coder:        'code-2',
+	tester:       'test-tube',
+	reviewer:     'microscope',
+	documenter:   'file-text',
+	debugger:     'bug',
+	custom:       'bot'
 };
 
-export const COMMON_EMOJIS = [
-	'🤖', '⚙️', '🔧', '🛠️', '🚀', '⚡', '🎯', '🔑', '🔒', '🌐',
-	'📊', '📈', '🗂️', '📝', '✅', '🔍', '🔬', '🧪', '🧠', '💡',
-	'🏗️', '🔨', '💻', '📡', '🛡️', '⚠️', '🔥', '❄️', '🌊', '🎛️',
-	'📦', '🗃️', '🔗', '📎', '🔁', '🔄', '⏱️', '🧩', '🎮', '🖥️'
+export const COMMON_LUCIDE_ICONS = [
+	'search', 'network', 'pen-tool', 'code-2', 'test-tube', 'microscope', 'file-text', 'bug',
+	'bot', 'cpu', 'terminal', 'git-branch', 'git-merge', 'git-pull-request', 'shield', 'shield-check',
+	'shield-alert', 'lock', 'key-round', 'unlock', 'eye', 'eye-off', 'check-circle', 'check-circle-2',
+	'alert-triangle', 'alert-circle', 'x-circle', 'x-octagon', 'zap', 'activity', 'pulse', 'gauge',
+	'speed', 'rocket', 'play', 'pause', 'stop', 'skip-forward', 'rotate-ccw', 'rotate-cw',
+	'refresh-cw', 'loader', 'loader-2', 'hourglass', 'clock', 'timer', 'calendar', 'history',
+	'database', 'server', 'cloud', 'hard-drive', 'folder', 'folder-open', 'file', 'file-code',
+	'braces', 'brackets', 'binary', 'package', 'box', 'layers', 'stack', 'grid',
+	'list', 'tree', 'workflow', 'git-graph', 'share-2', 'link', 'link-2', 'unlink',
+	'message-square', 'message-circle', 'mail', 'send', 'inbox', 'bell', 'bookmark', 'flag',
+	'star', 'heart', 'thumbs-up', 'thumbs-down', 'smile', 'frown', 'meh', 'award',
+	'trophy', 'target', 'crosshair', 'focus', 'compass', 'map', 'map-pin', 'navigation',
+	'settings', 'settings-2', 'sliders', 'sliders-horizontal', 'toggle-left', 'toggle-right', 'power', 'switch-camera',
+	'wrench', 'hammer', 'tools', 'screwdriver', 'saw', 'ruler', 'pen', 'pencil',
+	'edit', 'edit-2', 'edit-3', 'trash', 'trash-2', 'delete', 'minus', 'minus-circle',
+	'plus', 'plus-circle', 'plus-square', 'x', 'chevron-down', 'chevron-up', 'chevron-left', 'chevron-right'
 ];
