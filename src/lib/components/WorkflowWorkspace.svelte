@@ -207,7 +207,7 @@
 			{#each $agents as agent, index (agent.id)}
 				{@const status = statusFor(agent)}
 				<details class="pipeline-step" open={status === 'running' || status === 'failed'}>
-					<summary><span class="step-index">{String(index + 1).padStart(2, '0')}</span><span class="step-main"><strong>{agent.name}</strong><small>{agent.role} · {modelFor(agent)}</small></span><span class="status-badge status-{status}">{status}</span></summary>
+					<summary><span class="step-index">{agent.icon || '·'}</span><span class="step-main"><strong>{agent.name}</strong><small>{agent.role} · {modelFor(agent)}</small></span><span class="status-badge status-{status}">{status}</span></summary>
 					<div class="step-detail"><div><span>Assigned skills</span><strong>{skillCount(agent)}</strong></div><div><span>Current task</span><strong>{$tasks.find((item) => item.agent_id === agent.id)?.title || 'Waiting for work'}</strong></div></div>
 				</details>
 			{/each}

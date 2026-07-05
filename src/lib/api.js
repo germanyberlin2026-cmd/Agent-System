@@ -112,21 +112,31 @@ export async function fetchApiKeys() {
 	}));
 }
 
-export async function createApiKey({ provider, label, api_key, available_models }) {
-	const hint = api_key.length > 8 ? `${api_key.slice(0, 4)}...${api_key.slice(-4)}` : '****';
+export async function createApiKey({ provider, label, api_key, available_models, base_url }) {
+	const hasKey = !!api_key;
+	const hint = hasKey && api_key.length > 8 ? `${api_key.slice(0, 4)}...${api_key.slice(-4)}` : (hasKey ? '****' : '');
 	const { data, error } = await supabase
 		.from('api_keys')
 		.insert({
 			provider: provider.toLowerCase(),
 			label,
-			api_key_encrypted: api_key,
+			api_key_encrypted: hasKey ? api_key : '',
 			api_key_hint: hint,
-			available_models: available_models || []
+			available_models: available_models || [],
+			base_url: base_url || ''
 		})
 		.select()
 		.single();
 	if (error) throw error;
 	return data;
+}
+
+export async function discoverOllamaModels(baseUrl) {
+	const url = (baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+	const response = await fetch(`${url}/api/tags`);
+	if (!response.ok) throw new Error(`Ollama responded with ${response.status}. Is Ollama running at ${url}?`);
+	const payload = await response.json();
+	return (payload.models || []).map((m) => m.name || m.model).filter(Boolean);
 }
 
 export async function discoverGoogleModels(apiKey) {

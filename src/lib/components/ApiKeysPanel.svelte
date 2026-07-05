@@ -1,44 +1,68 @@
 <script>
 	import { apiKeys, agents, assignments, addToast } from '../stores.js';
-	import { PROVIDERS, PROVIDER_MODELS, MODEL_METADATA, getModelInfo, getModelRecommendation } from '../constants.js';
-	import { createApiKey, updateApiKeyModels, deleteApiKey, assignModelToAgent, removeAssignment, fetchApiKeys, fetchAssignments } from '../api.js';
-	import { Plus, Trash2, RefreshCw, KeyRound, Check, AlertTriangle, Minus } from '@lucide/svelte';
+	import { PROVIDERS, PROVIDER_META, PROVIDER_MODELS, MODEL_METADATA, getModelInfo, getModelRecommendation } from '../constants.js';
+	import { createApiKey, updateApiKeyModels, deleteApiKey, assignModelToAgent, removeAssignment, fetchApiKeys, fetchAssignments, discoverOllamaModels } from '../api.js';
+	import { Plus, Trash2, RefreshCw, KeyRound, Check, AlertTriangle, Minus, Search, Loader2 } from '@lucide/svelte';
 
 	let showAddKey = $state(false);
 	let newProvider = $state('openai');
 	let newLabel = $state('');
 	let newApiKey = $state('');
+	let newBaseUrl = $state('http://localhost:11434');
 	let customModels = $state('');
 	let saving = $state(false);
 	let syncingKeyId = $state(null);
+	let discoveringOllama = $state(false);
+
+	const providerEntries = Object.entries(PROVIDERS).map(([key, value]) => ({ key, value, ...PROVIDER_META[value] }));
 
 	async function handleAddKey() {
-		if (!newLabel.trim() || !newApiKey.trim()) {
-			addToast('Label and API key are required', 'error');
-			return;
-		}
+		const meta = PROVIDER_META[newProvider];
+		if (!newLabel.trim()) { addToast('Label is required', 'error'); return; }
+		if (meta.requiresKey && !newApiKey.trim()) { addToast('API key is required for this provider', 'error'); return; }
+		if (newProvider === 'ollama' && !newBaseUrl.trim()) { addToast('Base URL is required for Ollama', 'error'); return; }
 		saving = true;
 		try {
-			const models = newProvider === 'custom'
-				? customModels.split(',').map(m => m.trim()).filter(Boolean)
-				: PROVIDER_MODELS[newProvider] || [];
+			let models = [];
+			if (newProvider === 'ollama') {
+				try {
+					models = await discoverOllamaModels(newBaseUrl);
+					if (!models.length) addToast('Ollama connected but no models found. Pull a model first with `ollama pull`.', 'warning');
+				} catch (err) {
+					addToast(`Ollama discovery failed: ${err.message}`, 'warning');
+					models = [];
+				}
+			} else if (newProvider === 'custom') {
+				models = customModels.split(',').map(m => m.trim()).filter(Boolean);
+			} else {
+				models = PROVIDER_MODELS[newProvider] || [];
+			}
 			await createApiKey({
 				provider: newProvider,
 				label: newLabel.trim(),
 				api_key: newApiKey.trim(),
-				available_models: models
+				available_models: models,
+				base_url: newProvider === 'ollama' || newProvider === 'custom' ? newBaseUrl.trim() : ''
 			});
 			apiKeys.set(await fetchApiKeys());
-			addToast('API key added', 'success');
+			addToast(`API key added${models.length ? ` (${models.length} models)` : ''}`, 'success');
 			showAddKey = false;
-			newLabel = '';
-			newApiKey = '';
-			customModels = '';
+			newLabel = ''; newApiKey = ''; customModels = '';
 		} catch (err) {
 			addToast(`Failed to add API key: ${err.message}`, 'error');
-		} finally {
-			saving = false;
-		}
+		} finally { saving = false; }
+	}
+
+	async function handleDiscoverOllama(key) {
+		syncingKeyId = key.id;
+		try {
+			const models = await discoverOllamaModels(key.base_url);
+			await updateApiKeyModels(key.id, models);
+			apiKeys.set(await fetchApiKeys());
+			addToast(`${models.length} Ollama models discovered`, 'success');
+		} catch (err) {
+			addToast(`Discovery failed: ${err.message}`, 'error');
+		} finally { syncingKeyId = null; }
 	}
 
 	async function handleSyncModels(key) {
@@ -50,9 +74,7 @@
 			addToast(`${models.length} models synced`, 'success');
 		} catch (err) {
 			addToast(`Model sync failed: ${err.message}`, 'error');
-		} finally {
-			syncingKeyId = null;
-		}
+		} finally { syncingKeyId = null; }
 	}
 
 	async function handleDeleteKey(id) {
@@ -61,9 +83,7 @@
 			apiKeys.set(await fetchApiKeys());
 			assignments.set(await fetchAssignments());
 			addToast('API key deleted', 'success');
-		} catch (err) {
-			addToast(`Failed to delete: ${err.message}`, 'error');
-		}
+		} catch (err) { addToast(`Failed to delete: ${err.message}`, 'error'); }
 	}
 
 	async function handleAssign(agentId, apiKeyId, modelId) {
@@ -80,28 +100,23 @@
 			await assignModelToAgent(agentId, apiKeyId, modelId);
 			assignments.set(await fetchAssignments());
 			addToast('Model assigned to agent', 'success');
-		} catch (err) {
-			addToast(`Failed to assign: ${err.message}`, 'error');
-		}
+		} catch (err) { addToast(`Failed to assign: ${err.message}`, 'error'); }
 	}
 
-	function getAssignment(agentId) {
-		return $assignments.find(a => a.agent_id === agentId);
-	}
-	function getApiKey(id) {
-		return $apiKeys.find(k => k.id === id);
-	}
-	function getModelsForProvider(provider) {
-		return PROVIDER_MODELS[provider] || [];
+	function getAssignment(agentId) { return $assignments.find(a => a.agent_id === agentId); }
+	function getApiKey(id) { return $apiKeys.find(k => k.id === id); }
+	function getModelsForProvider(provider) { return PROVIDER_MODELS[provider] || []; }
+	function getModelsForKey(key) {
+		if (key.available_models?.length) return key.available_models;
+		return PROVIDER_MODELS[key.provider] || [];
 	}
 	function meterValue(level) {
-		const map = { 'unknown': 25, 'low': 33, 'medium': 50, 'medium-high': 67, 'high': 84, 'very-high': 100, 'fast': 90, 'medium-fast': 70, 'medium': 50, 'slow': 30, 'very-low': 15, 'low': 33, 'medium-low': 50, 'medium': 67, 'high': 84, 'very-high': 100 };
+		const map = { 'unknown': 25, 'low': 33, 'medium': 50, 'medium-high': 67, 'high': 84, 'very-high': 100, 'fast': 90, 'medium-fast': 70, 'medium': 50, 'slow': 30, 'very-low': 15, 'medium-low': 50, 'very-fast': 95 };
 		return map[level?.toLowerCase()] || 25;
 	}
 	function meterClass(level) {
 		const l = level?.toLowerCase();
-		if (['high', 'very-high', 'fast', 'medium-fast'].includes(l)) return 'success';
-		if (['medium', 'medium-high', 'medium-low'].includes(l)) return '';
+		if (['high', 'very-high', 'fast', 'medium-fast', 'very-fast'].includes(l)) return 'success';
 		if (['low', 'slow', 'very-low', 'unknown'].includes(l)) return 'warning';
 		return '';
 	}
@@ -113,7 +128,7 @@
 		<header class="section-head">
 			<div>
 				<h3>Provider Keys</h3>
-				<p>LLM API credentials. Keys are masked and never exposed in full.</p>
+				<p>LLM API credentials. Keys are masked and never exposed in full. Ollama runs locally and needs no key.</p>
 			</div>
 			<button class="btn btn-primary" onclick={() => showAddKey = !showAddKey}>
 				<Plus size={13} strokeWidth={2.2} />
@@ -127,8 +142,8 @@
 					<label class="field">
 						<span>Provider</span>
 						<select class="input" bind:value={newProvider}>
-							{#each Object.values(PROVIDERS) as provider}
-								<option value={provider}>{provider}</option>
+							{#each providerEntries as entry}
+								<option value={entry.value}>{entry.label}</option>
 							{/each}
 						</select>
 					</label>
@@ -136,21 +151,40 @@
 						<span>Label</span>
 						<input class="input" placeholder="e.g. OpenAI Production" bind:value={newLabel} />
 					</label>
-					<label class="field col-span-2">
-						<span>API Key</span>
-						<input class="input mono" type="password" placeholder="sk-..." bind:value={newApiKey} />
-					</label>
+
+					{#if PROVIDER_META[newProvider]?.hasUrl}
+						<label class="field col-span-2">
+							<span>Base URL</span>
+							<input class="input mono" bind:value={newBaseUrl} placeholder="http://localhost:11434" />
+							<small class="field-hint">{newProvider === 'ollama' ? 'Ollama API endpoint. Default: http://localhost:11434' : 'OpenAI-compatible API base URL'}</small>
+						</label>
+					{/if}
+
+					{#if PROVIDER_META[newProvider]?.requiresKey}
+						<label class="field col-span-2">
+							<span>API Key</span>
+							<input class="input mono" type="password" placeholder={PROVIDER_META[newProvider]?.placeholder || 'API key'} bind:value={newApiKey} />
+						</label>
+					{/if}
+
 					{#if newProvider === 'custom'}
 						<label class="field col-span-2">
 							<span>Available Models (comma-separated)</span>
 							<input class="input" placeholder="model-1, model-2, model-3" bind:value={customModels} />
 						</label>
 					{/if}
+
+					{#if newProvider === 'ollama'}
+						<div class="col-span-2 ollama-hint">
+							<span class="rec-badge rec-neutral">Local</span>
+							<span>No API key needed. Models are discovered automatically from your Ollama instance. Make sure Ollama is running.</span>
+						</div>
+					{/if}
 				</div>
 				<div class="form-actions">
 					<button class="btn btn-ghost" onclick={() => showAddKey = false}>Cancel</button>
 					<button class="btn btn-primary" onclick={handleAddKey} disabled={saving}>
-						{saving ? 'Saving...' : 'Save Key'}
+						{#if saving}<Loader2 size={13} class="spin" /> Saving...{:else}<Plus size={13} /> Save Key{/if}
 					</button>
 				</div>
 			</div>
@@ -160,27 +194,33 @@
 			<div class="empty-state compact">
 				<KeyRound size={28} />
 				<strong>No API keys added</strong>
-				<p>Add a provider key to enable model assignment for agents.</p>
+				<p>Add a provider key or connect a local Ollama instance to enable model assignment.</p>
 			</div>
 		{:else}
 			<div class="keys-table">
 				<div class="keys-table-head">
 					<span>Provider</span>
 					<span>Label</span>
-					<span>Key</span>
+					<span>Key / URL</span>
 					<span>Models</span>
 					<span>Actions</span>
 				</div>
 				{#each $apiKeys as key (key.id)}
 					<div class="keys-table-row">
-						<span class="badge badge-green">{key.provider}</span>
+						<span class="badge badge-green">{PROVIDER_META[key.provider]?.label || key.provider}</span>
 						<span class="key-label">{key.label}</span>
-						<span class="key-hint mono">{key.api_key_hint}</span>
-						<span class="key-models">{getModelsForProvider(key.provider).length} available</span>
+						<span class="key-hint mono">
+							{#if key.provider === 'ollama'}{key.base_url || 'http://localhost:11434'}{:else}{key.api_key_hint || '—'}{/if}
+						</span>
+						<span class="key-models">{getModelsForKey(key).length} available</span>
 						<span class="key-actions">
-							{#if key.provider === 'google'}
+							{#if key.provider === 'ollama'}
+								<button class="icon-btn" onclick={() => handleDiscoverOllama(key)} disabled={syncingKeyId === key.id} title="Discover models from Ollama">
+									{#if syncingKeyId === key.id}<Loader2 size={13} class="spin" />{:else}<Search size={13} />{/if}
+								</button>
+							{:else if key.provider !== 'custom'}
 								<button class="icon-btn" onclick={() => handleSyncModels(key)} disabled={syncingKeyId === key.id} title="Sync models">
-									{#if syncingKeyId === key.id}<RefreshCw size={13} class="spin" />{:else}<RefreshCw size={13} />{/if}
+									{#if syncingKeyId === key.id}<Loader2 size={13} class="spin" />{:else}<RefreshCw size={13} />{/if}
 								</button>
 							{/if}
 							<button class="icon-btn danger" onclick={() => handleDeleteKey(key.id)} title="Delete key">
@@ -211,8 +251,11 @@
 					{@const rec = modelInfo ? getModelRecommendation(agent.role, modelInfo) : null}
 					<div class="matrix-row">
 						<div class="matrix-agent">
-							<span class="badge badge-dim">{agent.role}</span>
-							<span class="matrix-agent-name">{agent.name}</span>
+							<span class="matrix-agent-icon">{agent.icon || '🤖'}</span>
+							<div>
+								<span class="badge badge-dim">{agent.role}</span>
+								<span class="matrix-agent-name">{agent.name}</span>
+							</div>
 						</div>
 
 						<div class="matrix-selects">
@@ -225,15 +268,15 @@
 										handleAssign(agent.id, null, null);
 									} else {
 										const key = getApiKey(keyId);
-										const firstModel = getModelsForProvider(key?.provider)[0];
+										const firstModel = getModelsForKey(key)[0];
 										if (firstModel) handleAssign(agent.id, keyId, firstModel);
-										else addToast(`No models found for ${key?.provider}`, 'error');
+										else addToast(`No models found for ${key?.provider}. ${key?.provider === 'ollama' ? 'Discover models first.' : ''}`, 'error');
 									}
 								}}
 							>
 								<option value="">No key</option>
 								{#each $apiKeys as key (key.id)}
-									<option value={key.id}>{key.label}</option>
+									<option value={key.id}>{key.label} · {PROVIDER_META[key.provider]?.label || key.provider}</option>
 								{/each}
 							</select>
 
@@ -244,7 +287,7 @@
 									onchange={(e) => handleAssign(agent.id, assignedKey.id, e.target.value)}
 								>
 									<option value="">Select model...</option>
-									{#each getModelsForProvider(assignedKey.provider) as modelId}
+									{#each getModelsForKey(assignedKey) as modelId}
 										<option value={modelId}>{modelId}</option>
 									{/each}
 								</select>
@@ -310,196 +353,55 @@
 </div>
 
 <style>
-	.keys-page {
-		display: flex;
-		flex-direction: column;
-		gap: 1.75rem;
-	}
-	.keys-section {
-		display: flex;
-		flex-direction: column;
-		gap: 0.875rem;
-	}
-	.section-head {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 1rem;
-	}
-	.section-head h3 {
-		font-size: 1rem;
-		font-weight: 700;
-		color: var(--color-text-primary);
-		margin: 0 0 0.25rem;
-		letter-spacing: -0.02em;
-	}
-	.section-head p {
-		font-size: 0.8125rem;
-		color: var(--color-text-muted);
-		margin: 0;
-	}
+	.keys-page { display: flex; flex-direction: column; gap: 1.75rem; }
+	.keys-section { display: flex; flex-direction: column; gap: 0.875rem; }
+	.section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+	.section-head h3 { font-size: 1rem; font-weight: 700; color: var(--color-text-primary); margin: 0 0 0.25rem; letter-spacing: -0.02em; }
+	.section-head p { font-size: 0.8125rem; color: var(--color-text-muted); margin: 0; }
 
-	.add-key-form {
-		padding: 1.125rem;
-		background: var(--color-surface-subtle);
-		border: 1px solid var(--color-border-default);
-		border-radius: 10px;
-	}
-	.form-grid-2 {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.75rem;
-	}
+	.add-key-form { padding: 1.125rem; background: var(--color-surface-subtle); border: 1px solid var(--color-border-default); border-radius: 10px; }
+	.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 	.col-span-2 { grid-column: 1 / -1; }
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-	}
-	.field span {
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: var(--color-text-secondary);
-	}
-	.form-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.5rem;
-		margin-top: 0.875rem;
-	}
+	.field { display: flex; flex-direction: column; gap: 0.375rem; }
+	.field span { font-size: 0.75rem; font-weight: 600; color: var(--color-text-secondary); }
+	.field-hint { font-size: 0.72rem; color: var(--color-text-muted); }
+	.form-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.875rem; }
 
-	.keys-table {
-		display: flex;
-		flex-direction: column;
-		border: 1px solid var(--color-border-default);
-		border-radius: 10px;
-		overflow: hidden;
-	}
-	.keys-table-head {
-		display: grid;
-		grid-template-columns: 100px 1fr 140px 100px 80px;
-		gap: 0.75rem;
-		padding: 0.625rem 0.875rem;
-		background: var(--color-background-subtle);
-		border-bottom: 1px solid var(--color-border-default);
-		font-size: 0.6875rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--color-text-muted);
-	}
-	.keys-table-row {
-		display: grid;
-		grid-template-columns: 100px 1fr 140px 100px 80px;
-		gap: 0.75rem;
-		padding: 0.75rem 0.875rem;
-		align-items: center;
-		border-bottom: 1px solid var(--color-border-subtle);
-	}
+	.ollama-hint { display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 0.75rem; background: var(--color-background-subtle); border-radius: 8px; font-size: 0.75rem; color: var(--color-text-muted); }
+
+	.keys-table { display: flex; flex-direction: column; border: 1px solid var(--color-border-default); border-radius: 10px; overflow: hidden; }
+	.keys-table-head { display: grid; grid-template-columns: 130px 1fr 180px 100px 80px; gap: 0.75rem; padding: 0.625rem 0.875rem; background: var(--color-background-subtle); border-bottom: 1px solid var(--color-border-default); font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); }
+	.keys-table-row { display: grid; grid-template-columns: 130px 1fr 180px 100px 80px; gap: 0.75rem; padding: 0.75rem 0.875rem; align-items: center; border-bottom: 1px solid var(--color-border-subtle); }
 	.keys-table-row:last-child { border-bottom: none; }
-	.key-label {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		color: var(--color-text-primary);
-	}
-	.key-hint {
-		font-size: 0.75rem;
-		color: var(--color-text-muted);
-	}
-	.key-models {
-		font-size: 0.75rem;
-		color: var(--color-text-secondary);
-	}
-	.key-actions {
-		display: flex;
-		gap: 0.25rem;
-	}
+	.key-label { font-size: 0.8125rem; font-weight: 600; color: var(--color-text-primary); }
+	.key-hint { font-size: 0.75rem; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.key-models { font-size: 0.75rem; color: var(--color-text-secondary); }
+	.key-actions { display: flex; gap: 0.25rem; }
 
-	.matrix {
-		display: flex;
-		flex-direction: column;
-		border: 1px solid var(--color-border-default);
-		border-radius: 10px;
-		overflow: hidden;
-	}
-	.matrix-row {
-		display: grid;
-		grid-template-columns: 180px 220px 1fr 160px;
-		gap: 1rem;
-		padding: 0.875rem 1rem;
-		align-items: flex-start;
-		border-bottom: 1px solid var(--color-border-subtle);
-	}
+	.icon-btn { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--color-border-default); background: transparent; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
+	.icon-btn:hover { background: var(--color-surface-subtle); color: var(--color-text-primary); border-color: var(--color-border-strong); }
+	.icon-btn.danger:hover { background: color-mix(in srgb, var(--color-status-danger-default) 10%, transparent); color: var(--color-status-danger-default); border-color: color-mix(in srgb, var(--color-status-danger-default) 30%, transparent); }
+
+	.matrix { display: flex; flex-direction: column; border: 1px solid var(--color-border-default); border-radius: 10px; overflow: hidden; }
+	.matrix-row { display: grid; grid-template-columns: 180px 220px 1fr 160px; gap: 1rem; padding: 0.875rem 1rem; align-items: flex-start; border-bottom: 1px solid var(--color-border-subtle); }
 	.matrix-row:last-child { border-bottom: none; }
-	.matrix-agent {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-	.matrix-agent-name {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		color: var(--color-text-primary);
-	}
-	.matrix-selects {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-	}
-	.input-sm {
-		padding: 0.375rem 0.5rem;
-		font-size: 0.75rem;
-	}
-	.no-key-placeholder {
-		font-size: 0.75rem;
-		color: var(--color-text-muted);
-		text-align: center;
-		padding: 0.5rem;
-	}
-	.matrix-capability {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-	.cap-grid {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 0.625rem;
-	}
-	.best-for {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	.best-for-tags {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem;
-	}
-	.cap-empty {
-		font-size: 0.75rem;
-		color: var(--color-text-muted);
-		padding: 0.5rem 0;
-	}
-	.matrix-rec {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-	.rec-reason {
-		font-size: 0.6875rem;
-		color: var(--color-text-muted);
-		line-height: 1.4;
-	}
+	.matrix-agent { display: flex; align-items: center; gap: 0.5rem; }
+	.matrix-agent-icon { font-size: 1.25rem; line-height: 1; }
+	.matrix-agent > div { display: flex; flex-direction: column; gap: 0.25rem; }
+	.matrix-agent-name { font-size: 0.8125rem; font-weight: 600; color: var(--color-text-primary); }
+	.matrix-selects { display: flex; flex-direction: column; gap: 0.375rem; }
+	.input-sm { padding: 0.375rem 0.5rem; font-size: 0.75rem; }
+	.no-key-placeholder { font-size: 0.75rem; color: var(--color-text-muted); text-align: center; padding: 0.5rem; }
+	.matrix-capability { display: flex; flex-direction: column; gap: 0.5rem; }
+	.cap-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.625rem; }
+	.best-for { display: flex; align-items: center; gap: 0.5rem; }
+	.best-for-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+	.cap-empty { font-size: 0.75rem; color: var(--color-text-muted); padding: 0.5rem 0; }
+	.matrix-rec { display: flex; flex-direction: column; gap: 0.25rem; }
+	.rec-reason { font-size: 0.6875rem; color: var(--color-text-muted); line-height: 1.4; }
 
 	@media (max-width: 1100px) {
-		.matrix-row {
-			grid-template-columns: 1fr;
-			gap: 0.625rem;
-		}
-		.keys-table-head, .keys-table-row {
-			grid-template-columns: 1fr;
-			gap: 0.375rem;
-		}
+		.matrix-row { grid-template-columns: 1fr; gap: 0.625rem; }
+		.keys-table-head, .keys-table-row { grid-template-columns: 1fr; gap: 0.375rem; }
 	}
 </style>
